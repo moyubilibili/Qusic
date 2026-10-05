@@ -180,15 +180,14 @@ public class AboutPage {
         lib.addView(settingRow(c, t, "清空曲库", Library.count() + " 首已导入", "close",
                 new Runnable() {
                     @Override public void run() {
-                        new android.app.AlertDialog.Builder(act)
-                                .setTitle("清空曲库？")
-                                .setMessage("只会把歌从 Qusic 的列表里移除，不会删除你手机里的文件。")
-                                .setNegativeButton("取消", null)
-                                .setPositiveButton("清空", new android.content.DialogInterface.OnClickListener() {
-                                    @Override public void onClick(android.content.DialogInterface d, int w) {
+                        new MdDialog.Builder(act)
+                                .title("清空曲库？")
+                                .message("只会把歌从 Qusic 的列表里移除，不会删除你手机里的文件。")
+                                .negative("取消", null)
+                                .positive("清空", new MdDialog.OnClick() {
+                                    @Override public void onClick() {
                                         Library.clear(act);
                                         act.refreshAllPages();
-                                        Toast.makeText(act, "已清空", Toast.LENGTH_SHORT).show();
                                     }
                                 }).show();
                     }

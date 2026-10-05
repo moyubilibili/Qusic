@@ -619,17 +619,24 @@ public class LibraryPage {
             head.addView(all, alp);
         }
 
-        // 导出
-        HomePage.IconView exp = new HomePage.IconView(c, "note",
-                Hct.withAlpha(t.onSurfaceVariant, 0.75f));
+        // 导出成 .Qusic —— 用带文字的按钮，别藏在「更多」里让人找不到
+        TextView exp = new TextView(c);
+        exp.setText("导出");
+        exp.setTextSize(12.5f);
+        exp.setTypeface(Ui.tfMed());
+        exp.setTextColor(t.onSecondaryContainer);
+        exp.setPadding(Ui.px(c, 14), Ui.px(c, 8), Ui.px(c, 14), Ui.px(c, 8));
+        exp.setBackground(pill(t.secondaryContainer, Ui.px(c, 20)));
         exp.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Ui.hapticLight(v);
                 act.exportPlaylist(cur.id);
             }
         });
-        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(Ui.px(c, 18), Ui.px(c, 18));
-        elp.leftMargin = Ui.px(c, 10);
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        elp.leftMargin = Ui.px(c, 8);
         head.addView(exp, elp);
         plBox.addView(head);
 
@@ -706,12 +713,12 @@ public class LibraryPage {
     /** 新建歌单 */
     private void askCreatePlaylist() {
         final MdField et = new MdField(act, "歌单名字");
-        new android.app.AlertDialog.Builder(act)
-                .setTitle("新建歌单")
-                .setView(et)
-                .setNegativeButton("取消", null)
-                .setPositiveButton("创建", new android.content.DialogInterface.OnClickListener() {
-                    @Override public void onClick(android.content.DialogInterface d, int w) {
+        new MdDialog.Builder(act)
+                .title("新建歌单")
+                .content(et)
+                .negative("取消", null)
+                .positive("创建", new MdDialog.OnClick() {
+                    @Override public void onClick() {
                         Playlist.create(act, et.text());
                         refresh();
                     }
@@ -720,9 +727,9 @@ public class LibraryPage {
 
     /** 歌单的「更多」菜单：重命名 / 删除 */
     private void playlistMenu(final Playlist.Item it) {
-        new android.app.AlertDialog.Builder(act)
-                .setTitle(it.name)
-                .setItems(new String[]{"导出为 .Qusic", "重命名", "删除歌单"},
+        new MdDialog.Builder(act)
+                .title(it.name)
+                .items(new String[]{"导出为 .Qusic", "重命名", "删除歌单"},
                         new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int which) {
                         if (which == 0) act.exportPlaylist(it.id);
@@ -735,12 +742,12 @@ public class LibraryPage {
     private void askRenamePlaylist(final Playlist.Item it) {
         final MdField et = new MdField(act, "歌单名字");
         et.setText(it.name);
-        new android.app.AlertDialog.Builder(act)
-                .setTitle("重命名歌单")
-                .setView(et)
-                .setNegativeButton("取消", null)
-                .setPositiveButton("保存", new android.content.DialogInterface.OnClickListener() {
-                    @Override public void onClick(android.content.DialogInterface d, int w) {
+        new MdDialog.Builder(act)
+                .title("重命名歌单")
+                .content(et)
+                .negative("取消", null)
+                .positive("保存", new MdDialog.OnClick() {
+                    @Override public void onClick() {
                         Playlist.rename(act, it.id, et.text());
                         refresh();
                     }
@@ -748,12 +755,12 @@ public class LibraryPage {
     }
 
     private void askDeletePlaylist(final Playlist.Item it) {
-        new android.app.AlertDialog.Builder(act)
-                .setTitle("删除歌单？")
-                .setMessage("「" + it.name + "」会被删除。\n只是移除这个歌单，不会删除任何歌曲文件。")
-                .setNegativeButton("取消", null)
-                .setPositiveButton("删除", new android.content.DialogInterface.OnClickListener() {
-                    @Override public void onClick(android.content.DialogInterface d, int w) {
+        new MdDialog.Builder(act)
+                .title("删除歌单？")
+                .message("「" + it.name + "」会被删除。\n只是移除这个歌单，不会删除任何歌曲文件。")
+                .negative("取消", null)
+                .positive("删除", new MdDialog.OnClick() {
+                    @Override public void onClick() {
                         Playlist.delete(act, it.id);
                         if (openListId == it.id) openListId = 0;
                         refresh();
@@ -814,12 +821,12 @@ public class LibraryPage {
         clr.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Ui.hapticLight(v);
-                new android.app.AlertDialog.Builder(act)
-                        .setTitle("清空播放历史？")
-                        .setMessage("只是清掉记录，不会删除任何歌曲文件。")
-                        .setNegativeButton("取消", null)
-                        .setPositiveButton("清空", new android.content.DialogInterface.OnClickListener() {
-                            @Override public void onClick(android.content.DialogInterface d, int w) {
+                new MdDialog.Builder(act)
+                        .title("清空播放历史？")
+                        .message("只是清掉记录，不会删除任何歌曲文件。")
+                        .negative("取消", null)
+                        .positive("清空", new MdDialog.OnClick() {
+                            @Override public void onClick() {
                                 History.clear(act);
                                 refresh();
                             }

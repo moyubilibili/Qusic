@@ -339,9 +339,9 @@ public final class Playlist {
         for (Item it : lists) {
             names.add(it.name + (contains(it.id, song) ? "（已添加）" : ""));
         }
-        new android.app.AlertDialog.Builder(act)
-                .setTitle("添加「" + song.title + "」到歌单")
-                .setItems(names.toArray(new String[0]),
+        new MdDialog.Builder(act)
+                .title("添加「" + song.title + "」到歌单")
+                .items(names.toArray(new String[0]),
                         new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int which) {
                         if (which == 0) {
@@ -365,12 +365,12 @@ public final class Playlist {
         // MD3 输入框：系统 EditText 放进 AlertDialog 是 Material 1 的样子，跟界面不搭
         final MdField et = new MdField(act, "歌单名字");
         et.focus();
-        new android.app.AlertDialog.Builder(act)
-                .setTitle(song == null ? "新建歌单" : "新建歌单并添加")
-                .setView(et)
-                .setNegativeButton("取消", null)
-                .setPositiveButton("创建", new android.content.DialogInterface.OnClickListener() {
-                    @Override public void onClick(android.content.DialogInterface d, int w) {
+        new MdDialog.Builder(act)
+                .title(song == null ? "新建歌单" : "新建歌单并添加")
+                .content(et)
+                .negative("取消", null)
+                .positive("创建", new MdDialog.OnClick() {
+                    @Override public void onClick() {
                         Item it = create(act, et.text());
                         if (song != null) add(act, it.id, song);
                         android.widget.Toast.makeText(act, "已添加到「" + it.name + "」",
