@@ -63,7 +63,8 @@ public class PlayerActivity extends Activity {
 
     @Override public void finish() {
         super.finish();
-        overridePendingTransition(0, 0);
+        // 播放页滑回底部，主界面回到前台
+        overridePendingTransition(R.anim.main_return, R.anim.player_exit);
     }
 
     @Override public void onBackPressed() {

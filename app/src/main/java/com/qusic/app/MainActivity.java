@@ -334,7 +334,8 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     public void openPlayer() {
         Intent i = new Intent(this, PlayerActivity.class);
         startActivity(i);
-        overridePendingTransition(0, 0);
+        // 播放页从底部滑上来，主界面同时轻微缩小变暗 —— 形成前后层次
+        overridePendingTransition(R.anim.player_enter, R.anim.main_recede);
     }
 
     // ── 播放服务 ────────────────────────────────────────────────────────────

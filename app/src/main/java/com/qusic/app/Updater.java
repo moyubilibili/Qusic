@@ -85,39 +85,80 @@ public final class Updater {
     }
 
     // ── 检查更新 ────────────────────────────────────────────────────────────
-    /** 后台线程请求，回调在主线程 */
+    private static final String ATOM =
+            "https://github.com/" + OWNER + "/" + REPO + "/releases.atom";
+    private static final String LATEST_PAGE =
+            "https://github.com/" + OWNER + "/" + REPO + "/releases/latest";
+
+    /**
+     * 后台线程检查，回调在主线程。
+     *
+     * <p><b>为什么不直接调 api.github.com：</b>未认证的 GitHub API 是
+     * <b>每 IP 每小时 60 次</b>，而很多用户走代理、IP 是共用的，很容易被耗光，
+     * 表现就是「一更新就提示过于频繁」（HTTP 403 + {@code x-ratelimit-remaining: 0}）。
+     *
+     * <p>所以改成三级来源，优先用**不消耗 API 额度**的方式：
+     * <ol>
+     *   <li>{@code releases.atom} —— 标签、标题、更新日志全都有，且无限流</li>
+     *   <li>{@code releases/latest} 的 302 跳转 —— 只拿标签，兜底</li>
+     *   <li>api.github.com —— 最后手段，可能限流</li>
+     * </ol>
+     */
     public static void check(final Context ctx, final Callback cb) {
         Library.pool().execute(new Runnable() {
             @Override public void run() {
                 Info info = new Info();
                 String err = null;
+                info.localCode = localVersionCode(ctx);
+
+                // ① 首选：atom feed
                 try {
-                    info.localCode = localVersionCode(ctx);
-                    String body = get(LATEST_API);
-                    Object root = Json.parse(body);
-                    if (root == null) throw new IllegalStateException("解析失败");
-                    String msg = Json.str(root, "message");
-                    if (msg != null) throw new IllegalStateException(msg);
+                    parseAtom(get(ATOM), info);
+                } catch (Throwable ignored) {}
 
-                    info.tag = nz(Json.str(root, "tag_name"));
-                    info.name = nz(Json.str(root, "name"));
-                    info.notes = nz(Json.str(root, "body"));
-                    info.pageUrl = nz(Json.str(root, "html_url"));
-                    info.remoteCode = parseVersion(info.tag);
-
-                    // 找第一个 .apk 附件
-                    java.util.List<Object> assets = Json.list(root, "assets");
-                    for (Object a : assets) {
-                        String n = Json.str(a, "name");
-                        if (n != null && n.toLowerCase().endsWith(".apk")) {
-                            info.apkUrl = nz(Json.str(a, "browser_download_url"));
-                            if (info.apkUrl.length() > 0) break;
+                // ② 兜底：302 重定向拿 tag
+                if (info.tag.length() == 0) {
+                    try {
+                        String tag = tagFromRedirect();
+                        if (tag.length() > 0) {
+                            info.tag = tag;
+                            info.name = "Qusic " + tag;
+                            info.pageUrl = "https://github.com/" + OWNER + "/" + REPO + "/releases/tag/" + tag;
                         }
-                    }
-                    info.hasUpdate = info.remoteCode > info.localCode;
-                } catch (Throwable t) {
-                    err = friendly(t);
+                    } catch (Throwable ignored) {}
                 }
+
+                // ③ 最后：GitHub API（有更新日志但可能限流）
+                if (info.tag.length() == 0) {
+                    try {
+                        Object root = Json.parse(get(LATEST_API));
+                        String msg = Json.str(root, "message");
+                        if (msg != null) throw new IllegalStateException(msg);
+                        info.tag = nz(Json.str(root, "tag_name"));
+                        info.name = nz(Json.str(root, "name"));
+                        info.notes = nz(Json.str(root, "body"));
+                        info.pageUrl = nz(Json.str(root, "html_url"));
+                    } catch (Throwable t) {
+                        err = friendly(t);
+                    }
+                }
+
+                if (info.tag.length() == 0 && err == null) {
+                    err = "连不上 GitHub（可能需要代理）";
+                }
+
+                if (info.tag.length() > 0) {
+                    info.remoteCode = parseVersion(info.tag);
+                    info.hasUpdate = info.remoteCode > info.localCode;
+                    if (info.pageUrl.length() == 0) {
+                        info.pageUrl = "https://github.com/" + OWNER + "/" + REPO
+                                + "/releases/tag/" + info.tag;
+                    }
+                    // 附件名遵循固定规则，可以直接拼出来，不必依赖 API 的资源列表
+                    info.apkUrl = "https://github.com/" + OWNER + "/" + REPO
+                            + "/releases/download/" + info.tag + "/Qusic-" + info.tag + ".apk";
+                }
+
                 final Info fi = info;
                 final String fe = err;
                 post(new Runnable() { @Override public void run() {
@@ -127,11 +168,68 @@ public final class Updater {
         });
     }
 
+    /** 解析 releases.atom：取最新一条的 tag、标题、正文 */
+    private static void parseAtom(String xml, Info info) {
+        if (xml == null || xml.length() == 0) return;
+        // 第一个 <entry> 就是最新版本
+        int e = xml.indexOf("<entry>");
+        if (e < 0) return;
+        int end = xml.indexOf("</entry>", e);
+        String entry = end > 0 ? xml.substring(e, end) : xml.substring(e);
+
+        java.util.regex.Matcher m = java.util.regex.Matcher.class != null
+                ? java.util.regex.Pattern.compile(
+                        "Repository/\\d+/([^<]+)</id>").matcher(entry) : null;
+        if (m != null && m.find()) info.tag = m.group(1).trim();
+
+        java.util.regex.Matcher t = java.util.regex.Pattern.compile(
+                "<title>([^<]*)</title>").matcher(entry);
+        if (t.find()) info.name = unescape(t.group(1));
+
+        java.util.regex.Matcher c = java.util.regex.Pattern.compile(
+                "<content type=\"html\">(.*?)</content>", java.util.regex.Pattern.DOTALL).matcher(entry);
+        if (c.find()) info.notes = stripHtml(unescape(c.group(1)));
+    }
+
+    /** 只拿 tag：读 releases/latest 的 302 Location，不跟随跳转 */
+    private static String tagFromRedirect() throws Exception {
+        HttpURLConnection c = (HttpURLConnection) new URL(LATEST_PAGE).openConnection();
+        c.setInstanceFollowRedirects(false);
+        c.setConnectTimeout(12000);
+        c.setReadTimeout(12000);
+        c.setRequestProperty("User-Agent", "Qusic-Updater");
+        String loc = c.getHeaderField("Location");
+        c.disconnect();
+        if (loc == null) return "";
+        int i = loc.lastIndexOf("/tag/");
+        return i < 0 ? "" : loc.substring(i + 5).trim();
+    }
+
+    /** 把 release 正文里的 HTML 变成可读纯文本 */
+    private static String stripHtml(String h) {
+        if (h == null) return "";
+        String s = h.replace("\r", "");
+        s = s.replaceAll("(?i)<br\\s*/?>", "\n");
+        s = s.replaceAll("(?i)</(p|div|li|h[1-6])>", "\n");
+        s = s.replaceAll("(?i)<li>", "· ");
+        s = s.replaceAll("<[^>]+>", "");
+        s = s.replaceAll("\n{3,}", "\n\n");
+        return s.trim();
+    }
+
+    private static String unescape(String s) {
+        if (s == null) return "";
+        return s.replace("&lt;", "<").replace("&gt;", ">")
+                .replace("&quot;", "\"").replace("&#39;", "'")
+                .replace("&nbsp;", " ").replace("&amp;", "&");
+    }
+
     private static String nz(String v) { return v == null ? "" : v; }
 
     private static String friendly(Throwable t) {
         String m = t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
-        if (m.contains("rate limit") || m.contains("API rate")) return "请求太频繁，稍后再试";
+        if (m.contains("rate limit") || m.contains("API rate"))
+            return "GitHub 接口限流了（共享 IP 常见），稍后再试或打开代理";
         if (m.contains("Unable to resolve host") || m.contains("Failed to connect"))
             return "连不上 GitHub（可能需要代理）";
         return "检查失败：" + m;
