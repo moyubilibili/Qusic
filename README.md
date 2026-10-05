@@ -13,18 +13,16 @@
 
 ## 截图
 
-<!-- 把截图放进 docs/screenshots/ 后，去掉下面这行的注释
 <p align="center">
-  <img src="docs/screenshots/02-home.png"    width="24%">
-  <img src="docs/screenshots/03-library.png" width="24%">
-  <img src="docs/screenshots/05-player.png"  width="24%">
-  <img src="docs/screenshots/06-lyrics.png"  width="24%">
+  <img src="docs/screenshots/01-welcome.jpg" width="22%" alt="欢迎页">
+  <img src="docs/screenshots/02-home.jpg"    width="22%" alt="首页">
+  <img src="docs/screenshots/04-search.jpg"  width="22%" alt="搜索页">
+  <img src="docs/screenshots/07-about.jpg"   width="22%" alt="关于页">
 </p>
--->
 
-> 截图存放说明见 [docs/screenshots/README.md](docs/screenshots/README.md)
-
----
+<p align="center">
+  <sub>欢迎页 · 首页 · 搜索（酷我） · 关于（主题配色）</sub>
+</p>
 
 ## 功能
 
