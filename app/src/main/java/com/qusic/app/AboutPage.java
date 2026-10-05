@@ -145,6 +145,17 @@ public class AboutPage {
         col.addView(opts, fullWidth());
 
         // ── 音乐库 ──
+        col.addView(section(c, "桌面歌词", t));
+        LinearLayout lyr = Ui.column(c);
+        lyr.setBackground(card(t));
+        lyr.setPadding(Ui.px(c, 6), Ui.px(c, 6), Ui.px(c, 6), Ui.px(c, 6));
+        lyr.addView(settingRow(c, t, "桌面歌词悬浮窗",
+                LyricsWindowService.isRunning() ? "已开启 · 点按关闭" : "在屏幕上悬浮显示歌词",
+                "note", new Runnable() {
+                    @Override public void run() { act.toggleLyricsWindow(); }
+                }));
+        col.addView(lyr, fullWidth());
+
         col.addView(section(c, "更新", t));
         LinearLayout upd = Ui.column(c);
         upd.setBackground(card(t));

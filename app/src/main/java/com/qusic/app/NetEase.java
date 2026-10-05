@@ -165,6 +165,36 @@ public final class NetEase {
         });
     }
 
+    /** 按「歌名 + 歌手」搜一首再取词 —— 跨音源兜底时用 */
+    public static void fetchLyricsBySearch(final Context ctx, final Song probe,
+                                           final Online.LyricsCallback cb) {
+        Library.pool().execute(new Runnable() {
+            @Override public void run() {
+                String lrc = null;
+                try {
+                    String kw = URLEncoder.encode(
+                            probe.title + " " + (probe.artist == null ? "" : probe.artist), "UTF-8");
+                    Object root = Json.parse(get("https://music.163.com/api/search/get"
+                            + "?s=" + kw + "&type=1&limit=1&offset=0"));
+                    List<Object> songs = Json.list(root, "result", "songs");
+                    if (!songs.isEmpty()) {
+                        long sid = Json.lng(songs.get(0), "id");
+                        if (sid != 0) {
+                            Object lr = Json.parse(get("https://music.163.com/api/song/lyric?id="
+                                    + sid + "&lv=1&kv=1&tv=-1"));
+                            String l = Json.str(lr, "lrc", "lyric");
+                            if (l != null && l.trim().length() > 0) lrc = l;
+                        }
+                    }
+                } catch (Throwable ignored) {}
+                final String fl = lrc;
+                post(new Runnable() { @Override public void run() {
+                    if (cb != null) cb.onResult(fl, null);
+                }});
+            }
+        });
+    }
+
     // ── 工具 ────────────────────────────────────────────────────────────────
     private static String nz(String v, String def) {
         return v == null || v.length() == 0 ? def : v;

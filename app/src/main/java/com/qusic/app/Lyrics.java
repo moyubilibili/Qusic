@@ -141,8 +141,56 @@ public final class Lyrics {
                 try { lock.wait(500); } catch (InterruptedException ignored) {}
             }
         }
-        if (box[0] == null || box[0].trim().length() == 0) return null;
-        return parse(box[0]);
+        if (box[0] != null && box[0].trim().length() > 0) return parse(box[0]);
+
+        // 本音源没有歌词 → 跨音源兜底。
+        // 实测酷我和网易云的歌词曲库互补：酷我没有的（漠河舞厅/成都/后来）
+        // 网易云基本都有，反之亦然。这样单一音源的缺口就被补上了。
+        String other = fetchFromOtherSource(ctx, s);
+        if (other != null && other.trim().length() > 0) return parse(other);
+        return null;
+    }
+
+    /** 用另一家音源按「歌名 + 歌手」找歌词 */
+    private static String fetchFromOtherSource(Context ctx, Song s) {
+        final Object lock = new Object();
+        final String[] box = new String[1];
+        final boolean[] done = new boolean[1];
+        Online.LyricsCallback cb = new Online.LyricsCallback() {
+            @Override public void onResult(String lrc, String error) {
+                synchronized (lock) {
+                    box[0] = lrc;
+                    done[0] = true;
+                    lock.notifyAll();
+                }
+            }
+        };
+        try {
+            // 造一个「只用于搜索」的临时 Song：换到另一家音源，
+            // 平台 id 先留空，让那边自己去搜
+            Song probe = new Song();
+            probe.title = s.title;
+            probe.artist = s.artist;
+            probe.album = s.album;
+            probe.durationMs = s.durationMs;
+            probe.online = true;
+            if (s.source == Song.SOURCE_KUWO) {
+                probe.source = Song.SOURCE_NETEASE;
+                NetEase.fetchLyricsBySearch(ctx, probe, cb);
+            } else {
+                probe.source = Song.SOURCE_KUWO;
+                Kuwo.fetchLyricsBySearch(ctx, probe, cb);
+            }
+        } catch (Throwable t) {
+            return null;
+        }
+        synchronized (lock) {
+            long deadline = System.currentTimeMillis() + 12000;
+            while (!done[0] && System.currentTimeMillis() < deadline) {
+                try { lock.wait(400); } catch (InterruptedException ignored) {}
+            }
+        }
+        return box[0];
     }
 
     // ── 歌词磁盘缓存 ────────────────────────────────────────────────────────

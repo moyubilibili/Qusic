@@ -425,6 +425,43 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         });
     }
 
+    // ── 桌面歌词 ────────────────────────────────────────────────────────────
+    public static final int REQ_OVERLAY = 5001;
+
+    /** 开关桌面歌词悬浮窗 */
+    public void toggleLyricsWindow() {
+        if (LyricsWindowService.isRunning()) {
+            LyricsWindowService.stop(this);
+            Toast.makeText(this, "桌面歌词已关闭", Toast.LENGTH_SHORT).show();
+            refreshAllPages();
+            return;
+        }
+        // 先确认有悬浮窗权限；没有就引导去设置页
+        if (!LyricsWindowService.canDraw(this)) {
+            new MdDialog.Builder(this)
+                    .title("需要「显示在其他应用上层」权限")
+                    .message("桌面歌词要浮在别的应用上面，得先授权。\n点「去设置」后在列表里找到 Qusic 并打开开关。")
+                    .negative("取消", null)
+                    .positive("去设置", new MdDialog.OnClick() {
+                        @Override public void onClick() {
+                            try {
+                                startActivityForResult(new Intent(
+                                        android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                        android.net.Uri.parse("package:" + getPackageName())),
+                                        REQ_OVERLAY);
+                            } catch (Throwable t) {
+                                Toast.makeText(MainActivity.this, "打不开设置页，请手动到「设置 → 应用 → 特殊权限」里开启",
+                                        Toast.LENGTH_LONG).show();
+                            }
+                        }
+                    }).show();
+            return;
+        }
+        LyricsWindowService.start(this);
+        Toast.makeText(this, "桌面歌词已开启，可拖动调整位置", Toast.LENGTH_SHORT).show();
+        refreshAllPages();
+    }
+
     // ── .Qusic 歌单导入导出 ────────────────────────────────────────────────
     /** 导出某个歌单：让用户选保存位置，文件名默认「歌单名.Qusic」 */
     public void exportPlaylist(long id) {
@@ -451,9 +488,11 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     public void importPlaylist() {
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
-        // 有些文件管理器对自定义后缀会过滤掉，两种 mime 都收
+        // 只用 "*/*"，**不要**再传 EXTRA_MIME_TYPES。
+        // .Qusic 是自定义后缀，系统不认识它，会归成 application/octet-stream；
+        // 一旦给了 EXTRA_MIME_TYPES，选择器就会按那个白名单过滤，
+        // 结果 .Qusic 文件直接变成灰色选不中（之前就是这个毛病）。
         i.setType("*/*");
-        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{Playlist.MIME, "text/plain", "*/*"});
         try {
             startActivityForResult(i, REQ_IMPORT_PLAYLIST);
         } catch (Throwable t) {
@@ -491,6 +530,18 @@ public class MainActivity extends Activity implements PlayerService.Listener {
 
     @Override protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
+
+        // ── 悬浮窗授权回来 ──
+        if (req == REQ_OVERLAY) {
+            if (LyricsWindowService.canDraw(this)) {
+                LyricsWindowService.start(this);
+                Toast.makeText(this, "桌面歌词已开启", Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "还没有授权，桌面歌词无法显示", Toast.LENGTH_LONG).show();
+            }
+            refreshAllPages();
+            return;
+        }
 
         // ── 导出歌单 ──
         if (req == REQ_EXPORT_PLAYLIST) {

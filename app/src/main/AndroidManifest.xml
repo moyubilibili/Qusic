@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.qusic.app"
-    android:versionCode="10700"
-    android:versionName="1.7">
+    android:versionCode="10800"
+    android:versionName="1.8">
 
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 内置更新：下载完 APK 后拉起安装界面 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 桌面歌词：悬浮窗 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <application
@@ -61,5 +63,10 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <!-- 桌面歌词悬浮窗 -->
+        <service
+            android:name=".LyricsWindowService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
     </application>
 </manifest>
