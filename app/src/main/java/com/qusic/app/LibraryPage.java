@@ -34,6 +34,7 @@ public class LibraryPage {
     private LinearLayout albumBox;
     private android.widget.ScrollView albumScroll;
     private LinearLayout emptyBox;
+    private LinearLayout opsRow;
     private android.widget.ScrollView historyScroll;
     private LinearLayout historyBox;
     private SegmentedBar segmented;
@@ -162,6 +163,7 @@ public class LibraryPage {
         shlp.leftMargin = Ui.px(c, 10);
         ops.addView(shuffleAll, shlp);
 
+        opsRow = ops;
         header.addView(ops);
         col.addView(header);
 
@@ -272,14 +274,20 @@ public class LibraryPage {
 
     private void applyMode() {
         if (mode == MODE_HISTORY) {
+            // 历史模式：把歌曲列表、分组列表、空状态全部关掉，
+            // 否则「曲库还是空的」会压在历史列表上面（之前就是这个 bug）
             listView.setVisibility(View.GONE);
             albumScroll.setVisibility(View.GONE);
+            emptyBox.setVisibility(View.GONE);
             historyScroll.setVisibility(View.VISIBLE);
+            if (opsRow != null) opsRow.setVisibility(View.GONE);   // 排序/随机播放对历史无意义
             buildHistory();
             return;
         }
         historyScroll.setVisibility(View.GONE);
+        if (opsRow != null) opsRow.setVisibility(View.VISIBLE);
         if (Library.isEmpty()) { refresh(); return; }
+        emptyBox.setVisibility(View.GONE);
         boolean songs = mode == MODE_SONGS;
         listView.setVisibility(songs ? View.VISIBLE : View.GONE);
         albumScroll.setVisibility(songs ? View.GONE : View.VISIBLE);
@@ -298,6 +306,8 @@ public class LibraryPage {
         listView.setVisibility(has && mode == MODE_SONGS ? View.VISIBLE : View.GONE);
         albumScroll.setVisibility(has && mode != MODE_SONGS && !hist ? View.VISIBLE : View.GONE);
         historyScroll.setVisibility(hist ? View.VISIBLE : View.GONE);
+        if (hist) emptyBox.setVisibility(View.GONE);
+        if (opsRow != null) opsRow.setVisibility(hist ? View.GONE : View.VISIBLE);
 
         List<Song> all = new ArrayList<>(Library.songs());
         sort(all);
