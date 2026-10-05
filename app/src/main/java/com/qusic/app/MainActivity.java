@@ -396,7 +396,14 @@ public class MainActivity extends Activity implements PlayerService.Listener {
                     return;
                 }
                 if (info.hasUpdate) {
-                    Updater.showUpdateDialog(self, info);
+                    if (Theme.autoUpdate() && info.apkUrl.length() > 0) {
+                        // 自动更新：不打断用户，后台下载，完成后系统提示安装
+                        Toast.makeText(self, "发现新版本 " + info.tag + "，正在后台下载…",
+                                Toast.LENGTH_SHORT).show();
+                        Updater.downloadAndInstall(self, info);
+                    } else {
+                        Updater.showUpdateDialog(self, info);
+                    }
                 } else if (manual) {
                     Toast.makeText(self, "已是最新版本 " + Updater.localVersionName(self),
                             Toast.LENGTH_SHORT).show();

@@ -115,6 +115,61 @@ public final class Kuwo {
         return null;
     }
 
+    // ── 歌词 ────────────────────────────────────────────────────────────────
+    /**
+     * 取歌词。
+     *
+     * <p>接口返回的是 {@code lrclist:[{time:"12.34", lineLyric:"..."}]}，
+     * 这里拼成标准 LRC 文本交给上层解析，保持和本地 .lrc 走同一条路。
+     *
+     * <p>注意 status 可能是 301（该曲查不到），此时按「无歌词」处理而不是报错。
+     */
+    public static void fetchLyrics(final Context ctx, final Song song,
+                                   final Online.LyricsCallback cb) {
+        if (song == null || song.neteaseId == 0) {
+            if (cb != null) cb.onResult(null, null);
+            return;
+        }
+        Library.pool().execute(new Runnable() {
+            @Override public void run() {
+                String lrc = null, err = null;
+                try {
+                    String body = get("https://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId="
+                            + song.neteaseId, "https://m.kuwo.cn/");
+                    Object root = Json.parse(body);
+                    long status = Json.lng(root, "status");
+                    List<Object> list = Json.list(root, "data", "lrclist");
+                    if (status == 200 && !list.isEmpty()) {
+                        StringBuilder sb = new StringBuilder();
+                        for (Object o : list) {
+                            String line = Json.str(o, "lineLyric");
+                            String t = Json.str(o, "time");
+                            if (line == null) continue;
+                            sb.append("[").append(fmtTime(t)).append("]").append(line).append("\n");
+                        }
+                        lrc = sb.toString();
+                    }
+                    // status!=200 或空列表 = 这首歌没有歌词，不算错误
+                } catch (Throwable t) {
+                    err = "取歌词失败：" + t.getClass().getSimpleName();
+                }
+                final String fl = lrc, fe = err;
+                post(new Runnable() { @Override public void run() {
+                    if (cb != null) cb.onResult(fl, fe);
+                }});
+            }
+        });
+    }
+
+    /** 秒 -> [mm:ss.xx] */
+    private static String fmtTime(String sec) {
+        double v = 0;
+        try { v = Double.parseDouble(sec); } catch (Throwable ignored) {}
+        int m = (int) (v / 60);
+        double s = v - m * 60;
+        return String.format(java.util.Locale.US, "%02d:%05.2f", m, s);
+    }
+
     // ── 解析 ────────────────────────────────────────────────────────────────
     private static Song toSong(Object o) {
         Song s = new Song();
@@ -148,12 +203,16 @@ public final class Kuwo {
 
     // ── HTTP ────────────────────────────────────────────────────────────────
     private static String get(String url) throws Exception {
+        return get(url, "http://www.kuwo.cn/");
+    }
+
+    private static String get(String url, String referer) throws Exception {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setRequestMethod("GET");
         c.setConnectTimeout(12000);
         c.setReadTimeout(12000);
         c.setRequestProperty("User-Agent", UA);
-        c.setRequestProperty("Referer", "http://www.kuwo.cn/");
+        c.setRequestProperty("Referer", referer);
         // 随机国内 IP，绕开地域限制
         c.setRequestProperty("X-Forwarded-For",
                 "116." + (20 + RND.nextInt(60)) + "." + RND.nextInt(255) + "." + RND.nextInt(255));

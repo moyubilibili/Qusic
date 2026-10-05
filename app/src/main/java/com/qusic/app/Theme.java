@@ -25,6 +25,7 @@ public final class Theme {
     public static final String K_LYRICS = "lyrics";
     public static final String K_CLOUD = "cloud";
     public static final String K_PSTYLE = "player_style";
+    public static final String K_AUTOUPDATE = "auto_update";
 
     /** 动画速度档位 */
     public static final int ANIM_FAST = 0, ANIM_NORMAL = 1, ANIM_SUBTLE = 2;
@@ -37,6 +38,7 @@ public final class Theme {
     private static boolean sLyrics = true;
     private static boolean sCloud = true;
     private static int sPlayerStyle = 0;
+    private static boolean sAutoUpdate = false;
     private static Listener sListener;
     private static SharedPreferences sPrefs;
 
@@ -54,6 +56,7 @@ public final class Theme {
         sLyrics = sPrefs.getBoolean(K_LYRICS, true);
         sCloud = sPrefs.getBoolean(K_CLOUD, true);
         sPlayerStyle = sPrefs.getInt(K_PSTYLE, 0);
+        sAutoUpdate = sPrefs.getBoolean(K_AUTOUPDATE, false);
         rebuild();
     }
 
@@ -72,6 +75,9 @@ public final class Theme {
     public static boolean cloudEnabled() { return sCloud; }
     /** 播放页样式：0=大封面 1=歌词页 2=极简 */
     public static int playerStyle() { return sPlayerStyle; }
+
+    /** 自动更新：发现新版直接后台下载，下完再提示安装 */
+    public static boolean autoUpdate() { return sAutoUpdate; }
     public static float animScale() {
         return sAnim == ANIM_FAST ? 0.62f : sAnim == ANIM_SUBTLE ? 1.45f : 1f;
     }
@@ -105,6 +111,11 @@ public final class Theme {
     public static void setLyrics(boolean b) {
         sLyrics = b;
         if (sPrefs != null) sPrefs.edit().putBoolean(K_LYRICS, b).apply();
+    }
+
+    public static void setAutoUpdate(boolean b) {
+        sAutoUpdate = b;
+        if (sPrefs != null) sPrefs.edit().putBoolean(K_AUTOUPDATE, b).apply();
     }
 
     public static void setPlayerStyle(int v) {

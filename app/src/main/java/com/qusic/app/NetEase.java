@@ -197,6 +197,34 @@ public final class NetEase {
         });
     }
 
+    /** 取歌词（网易云的公开歌词接口，无需登录） */
+    public static void fetchLyrics(final Context ctx, final Song song,
+                                   final Online.LyricsCallback cb) {
+        if (song == null || song.neteaseId == 0) {
+            if (cb != null) cb.onResult(null, null);
+            return;
+        }
+        Library.pool().execute(new Runnable() {
+            @Override public void run() {
+                String lrc = null, err = null;
+                try {
+                    String body = get("https://music.163.com/api/song/lyric?id="
+                            + song.neteaseId + "&lv=1&kv=1&tv=-1",
+                            "https://music.163.com/");
+                    Object root = Json.parse(body);
+                    String l = Json.str(root, "lrc", "lyric");
+                    if (l != null && l.trim().length() > 0) lrc = l;
+                } catch (Throwable t) {
+                    err = "取歌词失败：" + t.getClass().getSimpleName();
+                }
+                final String fl = lrc, fe = err;
+                post(new Runnable() { @Override public void run() {
+                    if (cb != null) cb.onResult(fl, fe);
+                }});
+            }
+        });
+    }
+
     /** 把一条 JSON 歌曲转成 Song */
     private static Song toSong(Object o) {
         Song s = new Song();
@@ -265,6 +293,27 @@ public final class NetEase {
         byte[] out = c.doFinal(block);
         StringBuilder sb = new StringBuilder();
         for (byte b : out) sb.append(String.format("%02x", b));
+        return sb.toString();
+    }
+
+    /** 简单的 GET（用于歌词等公开接口） */
+    private static String get(String url, String referer) throws Exception {
+        java.net.HttpURLConnection c =
+                (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+        c.setRequestMethod("GET");
+        c.setConnectTimeout(12000);
+        c.setReadTimeout(12000);
+        c.setRequestProperty("User-Agent", UA);
+        c.setRequestProperty("Referer", referer);
+        StringBuilder sb = new StringBuilder();
+        java.io.InputStream in = c.getResponseCode() < 400 ? c.getInputStream() : c.getErrorStream();
+        if (in != null) {
+            BufferedReader r = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+            String l;
+            while ((l = r.readLine()) != null) sb.append(l);
+            r.close();
+        }
+        c.disconnect();
         return sb.toString();
     }
 

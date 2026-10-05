@@ -155,6 +155,15 @@ public class AboutPage {
                     @Override public void run() { act.checkForUpdatesManually(); }
                 }));
         upd.addView(divider(c, t));
+        upd.addView(settingRow(c, t, "自动更新",
+                Theme.autoUpdate() ? "已开启 · 发现新版自动下载" : "已关闭 · 发现新版先询问",
+                "refresh", new Runnable() {
+                    @Override public void run() {
+                        Theme.setAutoUpdate(!Theme.autoUpdate());
+                        act.recreate();
+                    }
+                }));
+        upd.addView(divider(c, t));
         upd.addView(settingRow(c, t, "打开发布页面", "在浏览器里查看所有版本", "note",
                 new Runnable() { @Override public void run() { Updater.openReleasesPage(act); } }));
         col.addView(upd, fullWidth());

@@ -96,10 +96,99 @@ public final class Lyrics {
 
     // ── 加载（只在后台线程调用） ────────────────────────────────────────────
     private static Entry load(Context ctx, Song s) {
-        Entry e = fromLrcFile(s);
-        if (e == null) e = fromSiblingLrc(ctx, s);
-        if (e == null) e = fromEmbedded(ctx, s);
+        // 先看磁盘缓存：在线歌词取一次就够了，没必要每次播放都联网
+        Entry cached = fromDiskCache(ctx, s);
+        if (cached != null) return cached;
+
+        Entry e;
+        if (s.online) {
+            // 在线曲目：本地文件那三条路都不可能命中，必须去音源取
+            e = fromOnline(ctx, s);
+        } else {
+            e = fromLrcFile(s);
+            if (e == null) e = fromSiblingLrc(ctx, s);
+            if (e == null) e = fromEmbedded(ctx, s);
+        }
+        if (e != null) saveDiskCache(ctx, s, e);
         return e;
+    }
+
+    /** 在线歌词：酷我 / 网易云 */
+    private static Entry fromOnline(Context ctx, Song s) {
+        final Object lock = new Object();
+        final String[] box = new String[1];
+        final boolean[] done = new boolean[1];
+        Online.LyricsCallback cb = new Online.LyricsCallback() {
+            @Override public void onResult(String lrc, String error) {
+                synchronized (lock) {
+                    box[0] = lrc;
+                    done[0] = true;
+                    lock.notifyAll();
+                }
+            }
+        };
+        try {
+            if (s.source == Song.SOURCE_KUWO) Kuwo.fetchLyrics(ctx, s, cb);
+            else if (s.source == Song.SOURCE_NETEASE) NetEase.fetchLyrics(ctx, s, cb);
+            else return null;
+        } catch (Throwable t) {
+            return null;
+        }
+        // 等回调（本来就在后台线程，阻塞没问题）
+        synchronized (lock) {
+            long deadline = System.currentTimeMillis() + 12000;
+            while (!done[0] && System.currentTimeMillis() < deadline) {
+                try { lock.wait(500); } catch (InterruptedException ignored) {}
+            }
+        }
+        if (box[0] == null || box[0].trim().length() == 0) return null;
+        return parse(box[0]);
+    }
+
+    // ── 歌词磁盘缓存 ────────────────────────────────────────────────────────
+    private static File lyricDir(Context ctx) {
+        File d = new File(ctx.getCacheDir(), "lyrics");
+        if (!d.exists()) d.mkdirs();
+        return d;
+    }
+
+    private static File lyricFile(Context ctx, Song s) {
+        String key = s.source + "_" + s.neteaseId + "_" + Integer.toHexString(
+                (s.title + s.artist).hashCode());
+        return new File(lyricDir(ctx), key + ".lrc");
+    }
+
+    private static Entry fromDiskCache(Context ctx, Song s) {
+        if (!s.online) return null;
+        try {
+            File f = lyricFile(ctx, s);
+            if (!f.exists() || f.length() == 0) return null;
+            return parse(readAll(new FileInputStream(f)));
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static void saveDiskCache(Context ctx, Song s, Entry e) {
+        if (!s.online || e == null || e.text == null) return;
+        try {
+            File f = lyricFile(ctx, s);
+            java.io.FileOutputStream fo = new java.io.FileOutputStream(f);
+            // 存原始 LRC 文本（带时间轴），方便下次直接解析
+            if (e.times != null && e.times.length == e.text.split("\n").length) {
+                String[] lines = e.text.split("\n");
+                StringBuilder sb = new StringBuilder();
+                for (int i = 0; i < lines.length; i++) {
+                    long t = e.times[i];
+                    sb.append(String.format(java.util.Locale.US, "[%02d:%05.2f]%s\n",
+                            t / 60000, (t % 60000) / 1000.0, lines[i]));
+                }
+                fo.write(sb.toString().getBytes("UTF-8"));
+            } else {
+                fo.write(e.text.getBytes("UTF-8"));
+            }
+            fo.close();
+        } catch (Throwable ignored) {}
     }
 
     /** 情况一：路径就是文件（file:// 或裸路径） */

@@ -8,6 +8,9 @@ public final class Online {
     public interface SearchCallback { void onResult(List<Song> songs, String error); }
     public interface UrlCallback { void onResult(String url, String error); }
 
+    /** 取歌词：返回 LRC 原文（可能为 null 表示该曲无歌词） */
+    public interface LyricsCallback { void onResult(String lrc, String error); }
+
     /** 当前默认的在线音源：酷我（零签名、免登录、免费 320k） */
     public static final int DEFAULT = Song.SOURCE_KUWO;
 
