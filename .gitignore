@@ -1,0 +1,23 @@
+# 构建产物
+build/
+*.apk
+*.ap_
+*.dex
+*.class
+obj/
+libs/
+res-c/
+
+# 签名与密钥（绝对不要提交）
+*.keystore
+*.jks
+*.p12
+*.pem
+local.properties
+.ghtoken
+
+# 编辑器
+.idea/
+*.iml
+.vscode/
+.DS_Store
