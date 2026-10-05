@@ -41,6 +41,14 @@ public class PlayerActivity extends Activity {
         root.setBackgroundColor(Color.BLACK);
 
         np = new NowPlayingView(this);
+        np.setOnAddToPlaylist(new Runnable() {
+            @Override public void run() {
+                Song cur = PlayerService.sCurrent;
+                if (cur == null) cur = PlayerService.instance() == null ? null
+                        : PlayerService.instance().current();
+                if (cur != null) Playlist.showAddDialog(PlayerActivity.this, cur, null);
+            }
+        });
         np.setOnBack(new NowPlayingView.OnBack() {
             @Override public void back() { finish(); }
         });

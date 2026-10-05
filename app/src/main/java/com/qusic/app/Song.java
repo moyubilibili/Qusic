@@ -18,7 +18,8 @@ public class Song {
     public boolean online;
 
     /** 在线来源 */
-    public static final int SOURCE_LOCAL = 0, SOURCE_NETEASE = 1, SOURCE_KUWO = 2;
+    public static final int SOURCE_LOCAL = 0, SOURCE_NETEASE = 1, SOURCE_KUWO = 2,
+            SOURCE_KUGOU = 3;
     public int source = SOURCE_LOCAL;
     /** 网易云歌曲 id */
     public long neteaseId;

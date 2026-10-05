@@ -15,15 +15,16 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 搜索页：本地曲库 / 网易云在线，两种来源用分段控件切换。
+ * 搜索页：本地曲库 / 酷我 / 酷狗 / 网易云，用分段控件切换。
  *
- * <p>在线模式走 {@link NetEase} 的匿名接口：搜索 → 点结果时解析直链 → 播放。
- * VIP 曲目拿不到直链会明确提示，而不是静默失败。
+ * <p>在线模式统一是「搜索 → 点结果时解析直链 → 播放」。
+ * 拿不到直链时会明确区分原因（需要付费 / 该曲无版权 / 网络问题），而不是静默失败。
  */
 public class SearchPage {
 
     // 0=本地 1=酷我 2=网易云
-    private static final int SRC_LOCAL = 0, SRC_KUWO = 1, SRC_NETEASE = 2;
+    private static final int SRC_LOCAL = 0, SRC_KUWO = 1, SRC_KUGOU = 2,
+            SRC_NETEASE = 3;
 
     private final MainActivity act;
     private View root;
@@ -69,7 +70,7 @@ public class SearchPage {
         header.addView(title);
 
         // 来源切换
-        srcBar = new LibraryPage.SegmentedBar(c, new String[]{"本地", "酷我", "网易云"});
+        srcBar = new LibraryPage.SegmentedBar(c, new String[]{"本地", "酷我", "酷狗", "网易云"});
         srcBar.setOnChange(new LibraryPage.SegmentedBar.OnChange() {
             @Override public void onChange(int i) {
                 if (source == i) return;
@@ -185,7 +186,9 @@ public class SearchPage {
 
     /** 当前在线来源的名字 */
     private String sourceName() {
-        return source == SRC_KUWO ? "酷我" : "网易云";
+        return Online.sourceName(source == SRC_KUWO ? Song.SOURCE_KUWO
+                : source == SRC_KUGOU ? Song.SOURCE_KUGOU
+                : Song.SOURCE_NETEASE);
     }
 
     /** 按来源分发搜索 */
@@ -198,6 +201,7 @@ public class SearchPage {
             }
         };
         if (source == SRC_KUWO) Kuwo.search(act, kw, cb);
+        else if (source == SRC_KUGOU) Kugou.search(act, kw, cb);
         else NetEase.search(act, kw, cb);
     }
 
@@ -219,6 +223,7 @@ public class SearchPage {
             }
         };
         if (source == SRC_KUWO) Kuwo.resolveUrl(act, s, cb);
+        else if (source == SRC_KUGOU) Kugou.resolveUrl(act, s, cb);
         else NetEase.resolveUrl(act, s, cb);
     }
 

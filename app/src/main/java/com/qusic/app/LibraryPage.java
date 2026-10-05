@@ -7,6 +7,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -26,7 +27,7 @@ import java.util.List;
 public class LibraryPage {
 
     private static final int MODE_SONGS = 0, MODE_ALBUMS = 1, MODE_ARTISTS = 2,
-            MODE_HISTORY = 3;
+            MODE_HISTORY = 3, MODE_PLAYLISTS = 4;
 
     private final MainActivity act;
     private View root;
@@ -35,6 +36,10 @@ public class LibraryPage {
     private android.widget.ScrollView albumScroll;
     private LinearLayout emptyBox;
     private LinearLayout opsRow;
+    private android.widget.ScrollView plScroll;
+    private LinearLayout plBox;
+    /** 当前打开的曲目选择：0=没打开，否则是歌单 id */
+    private long openListId;
     private android.widget.ScrollView historyScroll;
     private LinearLayout historyBox;
     private SegmentedBar segmented;
@@ -97,7 +102,7 @@ public class LibraryPage {
         countLabel.setPadding(0, Ui.px(c, 2), 0, Ui.px(c, 14));
         header.addView(countLabel);
 
-        segmented = new SegmentedBar(c, new String[]{"歌曲", "专辑", "歌手", "最近"});
+        segmented = new SegmentedBar(c, new String[]{"歌曲", "专辑", "歌手", "最近", "歌单"});
         segmented.setOnChange(new SegmentedBar.OnChange() {
             @Override public void onChange(int i) { mode = i; applyMode(); }
         });
@@ -169,6 +174,11 @@ public class LibraryPage {
 
         // 歌曲列表
         listView = new SongListView(c);
+        listView.setOnLongPick(new SongListView.OnLongPick() {
+            @Override public void onLongPick(List<Song> visible, int index) {
+                if (index >= 0 && index < visible.size()) askAddToPlaylist(visible.get(index));
+            }
+        });
         listView.setOnPick(new SongListView.OnPick() {
             @Override public void onPick(List<Song> visible, int index) {
                 PlayerService s = PlayerService.instance();
@@ -198,6 +208,17 @@ public class LibraryPage {
         historyBox.setPadding(pad, Ui.px(c, 6), pad, act.contentBottomInset());
         historyScroll.addView(historyBox);
         col.addView(historyScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        // 歌单（列表 / 详情共用一个容器，靠 openListId 区分层级）
+        plScroll = new android.widget.ScrollView(c);
+        plScroll.setVerticalScrollBarEnabled(false);
+        plScroll.setClipToPadding(false);
+        plScroll.setVisibility(View.GONE);
+        plBox = Ui.column(c);
+        plBox.setPadding(pad, Ui.px(c, 6), pad, act.contentBottomInset());
+        plScroll.addView(plBox);
+        col.addView(plScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         // 空状态
@@ -273,6 +294,18 @@ public class LibraryPage {
     }
 
     private void applyMode() {
+        if (mode == MODE_PLAYLISTS) {
+            listView.setVisibility(View.GONE);
+            albumScroll.setVisibility(View.GONE);
+            emptyBox.setVisibility(View.GONE);
+            historyScroll.setVisibility(View.GONE);
+            plScroll.setVisibility(View.VISIBLE);
+            if (opsRow != null) opsRow.setVisibility(View.GONE);
+            buildPlaylists();
+            return;
+        }
+        if (plScroll != null) plScroll.setVisibility(View.GONE);
+        openListId = 0;
         if (mode == MODE_HISTORY) {
             // 历史模式：把歌曲列表、分组列表、空状态全部关掉，
             // 否则「曲库还是空的」会压在历史列表上面（之前就是这个 bug）
@@ -303,6 +336,19 @@ public class LibraryPage {
         segmented.setVisibility(View.VISIBLE);
         importBtn.setVisibility(has ? View.VISIBLE : View.GONE);
         boolean hist = mode == MODE_HISTORY;
+        boolean pls = mode == MODE_PLAYLISTS;
+        if (pls) {
+            listView.setVisibility(View.GONE);
+            albumScroll.setVisibility(View.GONE);
+            emptyBox.setVisibility(View.GONE);
+            historyScroll.setVisibility(View.GONE);
+            plScroll.setVisibility(View.VISIBLE);
+            if (opsRow != null) opsRow.setVisibility(View.GONE);
+            countLabel.setText(Playlist.count() + " 个歌单");
+            buildPlaylists();
+            return;
+        }
+        if (plScroll != null) plScroll.setVisibility(View.GONE);
         listView.setVisibility(has && mode == MODE_SONGS ? View.VISIBLE : View.GONE);
         albumScroll.setVisibility(has && mode != MODE_SONGS && !hist ? View.VISIBLE : View.GONE);
         historyScroll.setVisibility(hist ? View.VISIBLE : View.GONE);
@@ -413,6 +459,294 @@ public class LibraryPage {
         return row;
     }
 
+    // ── 歌单 ────────────────────────────────────────────────────────────────
+    /** 歌单页：openListId 为 0 时是歌单列表，否则是某个歌单的详情 */
+    private void buildPlaylists() {
+        Context c = act;
+        Tokens t = Theme.t();
+        plBox.removeAllViews();
+        if (openListId == 0) buildPlaylistIndex(c, t);
+        else buildPlaylistDetail(c, t);
+    }
+
+    private void buildPlaylistIndex(Context c, Tokens t) {
+        // 新建
+        TextView nw = new TextView(c);
+        nw.setText("＋ 新建歌单");
+        nw.setTextSize(13);
+        nw.setTypeface(Ui.tfBold());
+        nw.setTextColor(t.onPrimary);
+        nw.setGravity(Gravity.CENTER);
+        nw.setPadding(0, Ui.px(c, 12), 0, Ui.px(c, 12));
+        nw.setBackground(pill(t.primary, Ui.px(c, 14)));
+        nw.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { Ui.hapticLight(v); askCreatePlaylist(); }
+        });
+        plBox.addView(nw, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
+        List<Playlist.Item> lists = Playlist.all();
+        if (lists.isEmpty()) {
+            TextView tv = new TextView(c);
+            tv.setText("还没有歌单。\n建一个，把喜欢的歌收进去 —— 本地和在线的都能放进来。");
+            tv.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.85f));
+            tv.setTextSize(13);
+            tv.setLineSpacing(Ui.px(c, 5), 1f);
+            tv.setPadding(0, Ui.px(c, 18), 0, 0);
+            plBox.addView(tv);
+            return;
+        }
+
+        for (final Playlist.Item it : lists) {
+            LinearLayout row = Ui.row(c);
+            row.setPadding(0, Ui.px(c, 10), 0, Ui.px(c, 10));
+
+            // 用第一首歌的封面拼个 2x2 网格感觉的缩略图；没有歌就画个通用图标
+            HomePage.IconView icon = new HomePage.IconView(c, "list",
+                    Hct.withAlpha(t.primary, 0.9f));
+            android.widget.FrameLayout thumb = new android.widget.FrameLayout(c);
+            android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+            bg.setColor(t.surfaceContainerHigh);
+            bg.setCornerRadius(Ui.px(c, 10));
+            thumb.setBackground(bg);
+            thumb.addView(icon, new android.widget.FrameLayout.LayoutParams(
+                    Ui.px(c, 22), Ui.px(c, 22), Gravity.CENTER));
+            row.addView(thumb, new LinearLayout.LayoutParams(Ui.px(c, 46), Ui.px(c, 46)));
+
+            LinearLayout col2 = Ui.column(c);
+            col2.setPadding(Ui.px(c, 12), 0, 0, 0);
+            TextView name = new TextView(c);
+            name.setText(it.name);
+            name.setTextColor(t.onSurface);
+            name.setTextSize(14.5f);
+            name.setTypeface(Ui.tfMed());
+            name.setMaxLines(1);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col2.addView(name);
+            TextView sub = new TextView(c);
+            sub.setText(it.size() + " 首");
+            sub.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.85f));
+            sub.setTextSize(11.5f);
+            col2.addView(sub);
+            row.addView(col2, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+            HomePage.IconView more = new HomePage.IconView(c, "equalizer",
+                    Hct.withAlpha(t.onSurfaceVariant, 0.6f));
+            more.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) { Ui.hapticLight(v); playlistMenu(it); }
+            });
+            row.addView(more, new LinearLayout.LayoutParams(Ui.px(c, 18), Ui.px(c, 18)));
+
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    Ui.hapticLight(v);
+                    openListId = it.id;
+                    buildPlaylists();
+                }
+            });
+            plBox.addView(row);
+        }
+    }
+
+    private void buildPlaylistDetail(Context c, Tokens t) {
+        Playlist.Item it = Playlist.byId(openListId);
+        if (it == null) { openListId = 0; buildPlaylists(); return; }
+
+        // 顶部：返回 + 名字 + 播放全部
+        LinearLayout head = Ui.row(c);
+        head.setPadding(0, 0, 0, Ui.px(c, 10));
+
+        TextView back = new TextView(c);
+        back.setText("‹ 歌单");
+        back.setTextSize(13);
+        back.setTypeface(Ui.tfMed());
+        back.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.95f));
+        back.setPadding(0, Ui.px(c, 8), Ui.px(c, 10), Ui.px(c, 8));
+        back.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { Ui.hapticLight(v); openListId = 0; buildPlaylists(); }
+        });
+        head.addView(back);
+
+        TextView title = new TextView(c);
+        title.setText(it.name);
+        title.setTextSize(15);
+        title.setTypeface(Ui.tfBold());
+        title.setTextColor(t.onSurface);
+        title.setMaxLines(1);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        head.addView(title, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        if (it.size() > 0) {
+            final List<Song> songs = new ArrayList<>(it.songs);
+            TextView all = new TextView(c);
+            all.setText("播放全部");
+            all.setTextSize(12.5f);
+            all.setTypeface(Ui.tfBold());
+            all.setTextColor(t.onPrimary);
+            all.setPadding(Ui.px(c, 14), Ui.px(c, 8), Ui.px(c, 14), Ui.px(c, 8));
+            all.setBackground(pill(t.primary, Ui.px(c, 20)));
+            all.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    Ui.hapticLight(v);
+                    playFromHistory(songs, 0);   // 逻辑一样：本地直放，在线先解析
+                }
+            });
+            LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            alp.leftMargin = Ui.px(c, 8);
+            head.addView(all, alp);
+        }
+        plBox.addView(head);
+
+        if (it.size() == 0) {
+            TextView tv = new TextView(c);
+            tv.setText("这个歌单还是空的。\n到「歌曲」或「最近」里长按一首歌，选「添加到歌单」。");
+            tv.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.85f));
+            tv.setTextSize(13);
+            tv.setLineSpacing(Ui.px(c, 5), 1f);
+            plBox.addView(tv);
+            return;
+        }
+
+        final List<Song> songs = new ArrayList<>(it.songs);
+        for (int i = 0; i < songs.size(); i++) {
+            final Song sg = songs.get(i);
+            final int idx = i;
+            LinearLayout row = Ui.row(c);
+            row.setPadding(0, Ui.px(c, 7), 0, Ui.px(c, 7));
+
+            HomePage.CoverThumb thumb = new HomePage.CoverThumb(c, sg);
+            row.addView(thumb, new LinearLayout.LayoutParams(Ui.px(c, 46), Ui.px(c, 46)));
+
+            LinearLayout col2 = Ui.column(c);
+            col2.setPadding(Ui.px(c, 12), 0, 0, 0);
+            TextView tt = new TextView(c);
+            tt.setText(sg.title);
+            tt.setTextColor(t.onSurface);
+            tt.setTextSize(14);
+            tt.setTypeface(Ui.tfMed());
+            tt.setMaxLines(1);
+            tt.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col2.addView(tt);
+            String sub = sg.subtitle() + " · " + sg.durationText();
+            if (sg.online) sub = Online.sourceName(sg.source) + " · " + sub;
+            TextView s2 = new TextView(c);
+            s2.setText(sub);
+            s2.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.85f));
+            s2.setTextSize(11.5f);
+            s2.setMaxLines(1);
+            s2.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            col2.addView(s2);
+            row.addView(col2, new LinearLayout.LayoutParams(0,
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+            HomePage.IconView del = new HomePage.IconView(c, "close",
+                    Hct.withAlpha(t.onSurfaceVariant, 0.5f));
+            del.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    Ui.hapticLight(v);
+                    Playlist.remove(act, openListId, sg);
+                    buildPlaylists();
+                }
+            });
+            row.addView(del, new LinearLayout.LayoutParams(Ui.px(c, 16), Ui.px(c, 16)));
+
+            row.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    Ui.hapticLight(v);
+                    playFromHistory(songs, idx);
+                }
+            });
+            row.setOnLongClickListener(new View.OnLongClickListener() {
+                @Override public boolean onLongClick(View v) {
+                    Ui.hapticStrong(v);
+                    askAddToPlaylist(sg);
+                    return true;
+                }
+            });
+            plBox.addView(row);
+        }
+    }
+
+    /** 新建歌单 */
+    private void askCreatePlaylist() {
+        final EditText et = new EditText(act);
+        et.setHint("歌单名字");
+        et.setTextSize(15);
+        et.setSingleLine(true);
+        int pad = Ui.px(act, 20);
+        android.widget.FrameLayout box = new android.widget.FrameLayout(act);
+        box.setPadding(pad, Ui.px(act, 8), pad, 0);
+        box.addView(et);
+        new android.app.AlertDialog.Builder(act)
+                .setTitle("新建歌单")
+                .setView(box)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("创建", new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int w) {
+                        Playlist.create(act, et.getText().toString());
+                        refresh();
+                    }
+                }).show();
+    }
+
+    /** 歌单的「更多」菜单：重命名 / 删除 */
+    private void playlistMenu(final Playlist.Item it) {
+        new android.app.AlertDialog.Builder(act)
+                .setTitle(it.name)
+                .setItems(new String[]{"重命名", "删除歌单"}, new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int which) {
+                        if (which == 0) askRenamePlaylist(it);
+                        else askDeletePlaylist(it);
+                    }
+                }).show();
+    }
+
+    private void askRenamePlaylist(final Playlist.Item it) {
+        final EditText et = new EditText(act);
+        et.setText(it.name);
+        et.setTextSize(15);
+        et.setSingleLine(true);
+        int pad = Ui.px(act, 20);
+        android.widget.FrameLayout box = new android.widget.FrameLayout(act);
+        box.setPadding(pad, Ui.px(act, 8), pad, 0);
+        box.addView(et);
+        new android.app.AlertDialog.Builder(act)
+                .setTitle("重命名歌单")
+                .setView(box)
+                .setNegativeButton("取消", null)
+                .setPositiveButton("保存", new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int w) {
+                        Playlist.rename(act, it.id, et.getText().toString());
+                        refresh();
+                    }
+                }).show();
+    }
+
+    private void askDeletePlaylist(final Playlist.Item it) {
+        new android.app.AlertDialog.Builder(act)
+                .setTitle("删除歌单？")
+                .setMessage("「" + it.name + "」会被删除。\n只是移除这个歌单，不会删除任何歌曲文件。")
+                .setNegativeButton("取消", null)
+                .setPositiveButton("删除", new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int w) {
+                        Playlist.delete(act, it.id);
+                        if (openListId == it.id) openListId = 0;
+                        refresh();
+                    }
+                }).show();
+    }
+
+    /** 「添加到歌单」—— 直接复用 Playlist 里的公用弹窗 */
+    public void askAddToPlaylist(final Song song) {
+        Playlist.showAddDialog(act, song, new Runnable() {
+            @Override public void run() { refresh(); }
+        });
+    }
+
     // ── 最近播放 ────────────────────────────────────────────────────────────
     private void buildHistory() {
         Context c = act;
@@ -507,7 +841,7 @@ public class LibraryPage {
         // 在线歌曲标注来源，避免和本地混淆
         String sub = s.subtitle() + " · " + s.durationText();
         if (s.online) {
-            sub = (s.source == Song.SOURCE_KUWO ? "酷我" : "网易云") + " · " + sub;
+            sub = Online.sourceName(s.source) + " · " + sub;
         }
         TextView s2 = new TextView(c);
         s2.setText(sub);
@@ -535,6 +869,14 @@ public class LibraryPage {
             @Override public void onClick(View v) {
                 Ui.hapticLight(v);
                 if (onPlay != null) onPlay.run();
+            }
+        });
+        // 长按 → 添加到歌单
+        row.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                Ui.hapticStrong(v);
+                askAddToPlaylist(s);
+                return true;
             }
         });
         return row;

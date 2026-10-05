@@ -49,15 +49,24 @@ echo "== 3/7 javac =="
 find "$SRC/java" "$OUT/gen" -name '*.java' > "$OUT/sources.txt"
 NSRC=$(wc -l < "$OUT/sources.txt")
 echo "   源文件数: $NSRC"
+# javac 的退出码必须直接判断。
+# 之前用「class 数 < 源文件数」当失败条件 —— 那是错的：
+# javac 遇到部分文件报错时，其余文件照样会产出 class，
+# 于是 202 个 class 对 33 个源文件也算「成功」，
+# 结果就是用上一次的旧 class 打了包，改动根本没进去。
 javac -encoding UTF-8 -source 8 -target 8 -nowarn \
   -bootclasspath "$TOOL/android.jar" \
   -classpath "$TOOL/android.jar" \
   -d "$OUT/classes" \
-  @"$OUT/sources.txt" 2>&1 | head -60
-# javac 失败判定：class 数少于源文件数
+  @"$OUT/sources.txt" > "$OUT/javac.log" 2>&1
+JAVAC_RC=$?
+grep -E "error:|错误:" "$OUT/javac.log" | head -40
 NCLASS=$(find "$OUT/classes" -name '*.class' 2>/dev/null | wc -l)
 echo "   产出 class 数: $NCLASS / 源文件 $NSRC"
-if [ "$NCLASS" -lt "$NSRC" ]; then echo "!! javac 失败"; exit 1; fi
+if [ "$JAVAC_RC" -ne 0 ]; then
+  echo "!! javac 失败（退出码 $JAVAC_RC）—— 中止构建，绝不能用旧 class 继续打包"
+  exit 1
+fi
 
 echo "== 4/7 d8 =="
 find "$OUT/classes" -name '*.class' > "$OUT/classes.txt"

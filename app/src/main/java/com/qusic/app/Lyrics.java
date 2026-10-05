@@ -129,6 +129,7 @@ public final class Lyrics {
         };
         try {
             if (s.source == Song.SOURCE_KUWO) Kuwo.fetchLyrics(ctx, s, cb);
+            else if (s.source == Song.SOURCE_KUGOU) Kugou.fetchLyrics(ctx, s, cb);
             else if (s.source == Song.SOURCE_NETEASE) NetEase.fetchLyrics(ctx, s, cb);
             else return null;
         } catch (Throwable t) {

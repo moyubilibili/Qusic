@@ -81,6 +81,18 @@ public class NowPlayingView extends View implements PlayerService.Listener {
     private float lyricsVel;              // 弹簧速度（让歌词面板有真实的加减速）
     private final RectF lyricArea = new RectF();
     /** 抽屉歌词的滚动位置与上一次的当前行（用于缓动） */
+    /** 长按队列按钮 → 添加到歌单 */
+    private final Runnable queueLongPress = new Runnable() {
+        @Override public void run() {
+            if (!dragging || touchMode != 0 || song == null) return;
+            queueLongFired = true;
+            Ui.hapticStrong(NowPlayingView.this);
+            if (cbAdd != null) cbAdd.run();
+        }
+    };
+    private boolean queueLongFired;
+    private Runnable cbAdd;
+
     private float lyricDrawY = Float.NaN;
     private int lastDrawLine = -2;
     private int lastCurLine = -1;
@@ -116,6 +128,9 @@ public class NowPlayingView extends View implements PlayerService.Listener {
     }
 
     public void setOnBack(OnBack b) { this.cb = b; }
+
+    /** 长按队列按钮时触发（播放页用它来「添加到歌单」） */
+    public void setOnAddToPlaylist(Runnable r) { this.cbAdd = r; }
 
     public void setActive(boolean a) { active = a; if (a) startLoops(); }
 
@@ -832,6 +847,9 @@ public class NowPlayingView extends View implements PlayerService.Listener {
                 touchMode = 0;
                 downX = x; downY = y;
                 baseLyricsPull = lyricsPull;
+                queueLongFired = false;
+                removeCallbacks(queueLongPress);
+                if (btnQueue.contains(x, y) && cbAdd != null) postDelayed(queueLongPress, 480);
                 if (seekRect.contains(x, y)) { touchMode = 1; seeking = true; seekTarget = posOf(x); }
                 else if (style != STYLE_COVER) touchMode = 0;   // 歌词页/极简页不上滑
                 else if (lyricsPull > 0.5f) touchMode = 3;
@@ -865,6 +883,11 @@ public class NowPlayingView extends View implements PlayerService.Listener {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
                 dragging = false;
+                removeCallbacks(queueLongPress);
+                if (queueLongFired) {          // 长按已处理，吞掉这次点击
+                    queueLongFired = false;
+                    return true;
+                }
                 PlayerService s = PlayerService.instance();
                 if (touchMode == 1 && s != null && durMs > 0) {
                     s.seek((int) (seekTarget * durMs));

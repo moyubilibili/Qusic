@@ -151,7 +151,8 @@ public final class History {
         o.put("uri", s.uri == null ? "" : s.uri);
         o.put("coverUrl", s.coverUrl == null ? "" : s.coverUrl);
         o.put("size", s.size);
-        o.put("mime", s.mime == null ? "" : s.mime);
+        o.put("mime", s.mime == null ? "" : s.mime);   // 酷狗用这里存 hash
+        o.put("pid2", s.neteaseId);
         return o;
     }
 

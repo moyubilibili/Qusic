@@ -32,6 +32,9 @@ import java.util.List;
  */
 public class SongListView extends View implements PlayerService.Listener {
 
+    /** 长按某一行的回调（用于「添加到歌单」这类操作） */
+    public interface OnLongPick { void onLongPick(List<Song> visible, int index); }
+
     public interface OnPick {
         void onPick(List<Song> visible, int index);
         default void onLongPick(Song s, int index) {}
@@ -70,6 +73,20 @@ public class SongListView extends View implements PlayerService.Listener {
 
     private float lastFrame;
 
+    private OnLongPick longCb;
+    /** 长按判定 */
+    private boolean longFired;
+    private final Runnable longPress = new Runnable() {
+        @Override public void run() {
+            if (!dragging || moved || pressed < 0) return;
+            longFired = true;
+            Ui.hapticStrong(SongListView.this);
+            if (longCb != null) longCb.onLongPick(data(), pressed);
+            pressed = -1;
+            invalidate();
+        }
+    };
+
     public SongListView(Context c) {
         super(c);
         touchSlop = Ui.dp(c, 8);
@@ -78,6 +95,7 @@ public class SongListView extends View implements PlayerService.Listener {
     }
 
     public void setOnPick(OnPick c) { this.cb = c; }
+    public void setOnLongPick(OnLongPick c) { this.longCb = c; }
 
     public void setData(List<Song> list) {
         List<Song> next = list != null ? list : new ArrayList<Song>();
@@ -433,12 +451,18 @@ public class SongListView extends View implements PlayerService.Listener {
                 dragging = true; moved = false; velocity = 0;
                 pressed = rowAt(y);
                 pressAnim = 0f;
+                longFired = false;
+                removeCallbacks(longPress);
+                if (longCb != null && pressed >= 0) postDelayed(longPress, 480);
                 invalidate();
                 return true;
 
             case MotionEvent.ACTION_MOVE: {
                 float dy = y - lastY;
-                if (!moved && Math.abs(y - downY) > touchSlop) { moved = true; pressed = -1; }
+                if (!moved && Math.abs(y - downY) > touchSlop) {
+                    moved = true; pressed = -1;
+                    removeCallbacks(longPress);          // 开始滚动就不算长按了
+                }
                 if (moved) {
                     scrollY -= dy;
                     // 边缘回弹
@@ -454,6 +478,13 @@ public class SongListView extends View implements PlayerService.Listener {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL: {
                 dragging = false;
+                removeCallbacks(longPress);
+                if (longFired) {           // 长按已触发，别再当成点击
+                    longFired = false;
+                    pressed = -1;
+                    invalidate();
+                    return true;
+                }
                 if (vt != null) {
                     vt.computeCurrentVelocity(1000);
                     velocity = -vt.getYVelocity();

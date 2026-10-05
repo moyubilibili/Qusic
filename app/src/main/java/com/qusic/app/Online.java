@@ -15,4 +15,14 @@ public final class Online {
     public static final int DEFAULT = Song.SOURCE_KUWO;
 
     private Online() {}
+
+    /** 音源显示名 */
+    public static String sourceName(int source) {
+        switch (source) {
+            case Song.SOURCE_KUWO:    return "酷我";
+            case Song.SOURCE_KUGOU:   return "酷狗";
+            case Song.SOURCE_NETEASE: return "网易云";
+            default:                  return "本地";
+        }
+    }
 }
