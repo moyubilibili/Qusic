@@ -145,6 +145,20 @@ public class AboutPage {
         col.addView(opts, fullWidth());
 
         // ── 音乐库 ──
+        col.addView(section(c, "更新", t));
+        LinearLayout upd = Ui.column(c);
+        upd.setBackground(card(t));
+        upd.setPadding(Ui.px(c, 6), Ui.px(c, 6), Ui.px(c, 6), Ui.px(c, 6));
+        upd.addView(settingRow(c, t, "检查更新",
+                "当前 " + Updater.localVersionName(act) + " · 从 GitHub Releases 获取",
+                "refresh", new Runnable() {
+                    @Override public void run() { act.checkForUpdatesManually(); }
+                }));
+        upd.addView(divider(c, t));
+        upd.addView(settingRow(c, t, "打开发布页面", "在浏览器里查看所有版本", "note",
+                new Runnable() { @Override public void run() { Updater.openReleasesPage(act); } }));
+        col.addView(upd, fullWidth());
+
         col.addView(section(c, "音乐库", t));
         LinearLayout lib = Ui.column(c);
         lib.setBackground(card(t));

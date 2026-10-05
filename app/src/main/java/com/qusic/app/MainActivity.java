@@ -95,9 +95,25 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         startAndBindPlayer();
         requestPermissionsIfNeeded();
 
+        maybeAutoCheckUpdate();
+
         if (getIntent() != null && getIntent().getBooleanExtra("open_player", false)) {
             root.postDelayed(new Runnable() { @Override public void run() { openPlayer(); } }, 260);
         }
+    }
+
+    /** 启动时静默检查更新，每天最多一次，不打扰用户 */
+    private void maybeAutoCheckUpdate() {
+        final android.content.SharedPreferences sp =
+                getSharedPreferences("qusic_state", MODE_PRIVATE);
+        long last = sp.getLong("last_update_check", 0);
+        if (System.currentTimeMillis() - last < 24L * 3600 * 1000) return;
+        root.postDelayed(new Runnable() {
+            @Override public void run() {
+                checkForUpdates(false);
+                sp.edit().putLong("last_update_check", System.currentTimeMillis()).apply();
+            }
+        }, 1800);
     }
 
     @Override protected void onNewIntent(Intent intent) {
@@ -364,6 +380,33 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         // 拒绝通知权限也能正常用，只是没有媒体通知
         refreshAllPages();
     }
+
+    /**
+     * 检查更新。
+     * @param manual true = 用户主动点的（无论有没有新版都给反馈）
+     */
+    public void checkForUpdates(final boolean manual) {
+        final android.app.Activity self = this;
+        if (manual) Toast.makeText(this, "正在检查更新…", Toast.LENGTH_SHORT).show();
+        Updater.check(this, new Updater.Callback() {
+            @Override public void onResult(Updater.Info info, String error) {
+                if (isFinishing()) return;
+                if (error != null) {
+                    if (manual) Toast.makeText(self, error, Toast.LENGTH_LONG).show();
+                    return;
+                }
+                if (info.hasUpdate) {
+                    Updater.showUpdateDialog(self, info);
+                } else if (manual) {
+                    Toast.makeText(self, "已是最新版本 " + Updater.localVersionName(self),
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+    }
+
+    /** 供「关于」页调用 */
+    public void checkForUpdatesManually() { checkForUpdates(true); }
 
     /** 打开文件选择器，让用户自己挑歌导入 */
     public void importMusic() {

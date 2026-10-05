@@ -1,39 +1,18 @@
-# Qusic
+# Qusic · 本地音乐播放器
 
-> 一个 Material Design 3 风格的 Android 本地音乐播放器。
-> 自己导入曲库、动态取色、沉浸式播放页、系统级实况通知 —— **纯 Java 手写 UI，零第三方依赖**。
-
-![Platform](https://img.shields.io/badge/Platform-Android%208.0%2B-3DDC84?logo=android&logoColor=white)
-![Design](https://img.shields.io/badge/Design-Material%20Design%203-6750A4)
-![Language](https://img.shields.io/badge/Language-Java-ED8B00?logo=openjdk&logoColor=white)
-![Dependencies](https://img.shields.io/badge/Dependencies-Zero-blue)
-![APK](https://img.shields.io/badge/APK-139%20KB-orange)
+Material Design 3 + 本地导入 + 在线音源（酷我 / 网易云）的 Android 音乐播放器。
+**零第三方依赖**，UI 全部自绘或使用平台 API，因此不需要 Gradle 联网拉 AAR。
 
 ---
 
-## 截图
+## 更新
 
-<p align="center">
-  <img src="docs/screenshots/01-welcome.jpg" width="22%" alt="欢迎页">
-  <img src="docs/screenshots/02-home.jpg"    width="22%" alt="首页">
-  <img src="docs/screenshots/04-search.jpg"  width="22%" alt="搜索页">
-  <img src="docs/screenshots/07-about.jpg"   width="22%" alt="关于页">
-</p>
+应用内置更新检查：启动时静默检查一次（每天最多一次），也可在
+**「关于 → 检查更新」**手动触发。发现新版本会弹窗展示更新内容并支持直接下载安装。
 
-<p align="center">
-  <sub>欢迎页 · 首页 · 搜索（酷我） · 关于（主题配色）</sub>
-</p>
+数据源就是本仓库的 [Releases](../../releases)，**不需要任何自建服务器**。
 
-## 功能
-
-| | |
-|---|---|
-| **导入制曲库** | 通过系统文件选择器自己挑歌，**不扫描**你的存储 |
-| **动态取色** | 一颗种子色推导整套 MD3 配色，10 组预设，可切换深色 |
-| **沉浸播放页** | 封面取色光晕、呼吸律动、三种版式（大封面 / 歌词 / 极简） |
-| **滚动歌词** | 支持 `.lrc` 时间轴与内嵌歌词，逐行高亮、点击跳转 |
-| **系统级流体云** | MediaSession + Android 16 实况更新，锁屏与实况窗都能控 |
-| **在线音源** | 酷我（免登录）/ 网易云（匿名），见下方免责声明 |
+完整版本历史见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
