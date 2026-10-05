@@ -271,6 +271,9 @@ public class PlayerService extends Service {
             onSongFailed(-1);
             return;
         }
+        // 记入播放历史（只记真正播放的，搜索列表里点开没播的不算）
+        try { History.record(this, s); } catch (Throwable ignored) {}
+
         notifySong();
         pushNotification();
     }

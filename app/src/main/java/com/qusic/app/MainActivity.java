@@ -75,6 +75,7 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         super.onCreate(st);
         Theme.init(this);
         Library.init(this);   // 恢复上次导入的曲库
+        History.init(this);   // 恢复播放历史
         Theme.setListener(new Theme.Listener() {
             @Override public void onThemeChanged(Tokens t) { recreate(); }
         });

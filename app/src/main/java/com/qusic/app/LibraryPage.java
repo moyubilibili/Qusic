@@ -25,7 +25,8 @@ import java.util.List;
  */
 public class LibraryPage {
 
-    private static final int MODE_SONGS = 0, MODE_ALBUMS = 1, MODE_ARTISTS = 2;
+    private static final int MODE_SONGS = 0, MODE_ALBUMS = 1, MODE_ARTISTS = 2,
+            MODE_HISTORY = 3;
 
     private final MainActivity act;
     private View root;
@@ -33,6 +34,8 @@ public class LibraryPage {
     private LinearLayout albumBox;
     private android.widget.ScrollView albumScroll;
     private LinearLayout emptyBox;
+    private android.widget.ScrollView historyScroll;
+    private LinearLayout historyBox;
     private SegmentedBar segmented;
     private TextView countLabel;
     private TextView importBtn;
@@ -93,7 +96,7 @@ public class LibraryPage {
         countLabel.setPadding(0, Ui.px(c, 2), 0, Ui.px(c, 14));
         header.addView(countLabel);
 
-        segmented = new SegmentedBar(c, new String[]{"歌曲", "专辑", "歌手"});
+        segmented = new SegmentedBar(c, new String[]{"歌曲", "专辑", "歌手", "最近"});
         segmented.setOnChange(new SegmentedBar.OnChange() {
             @Override public void onChange(int i) { mode = i; applyMode(); }
         });
@@ -184,6 +187,17 @@ public class LibraryPage {
         col.addView(albumScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
+        // 历史列表（独立一个，因为它可能包含在线歌曲，点击行为不同）
+        historyScroll = new android.widget.ScrollView(c);
+        historyScroll.setVerticalScrollBarEnabled(false);
+        historyScroll.setClipToPadding(false);
+        historyScroll.setVisibility(View.GONE);
+        historyBox = Ui.column(c);
+        historyBox.setPadding(pad, Ui.px(c, 6), pad, act.contentBottomInset());
+        historyScroll.addView(historyBox);
+        col.addView(historyScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
         // 空状态
         emptyBox = Ui.column(c);
         emptyBox.setGravity(Gravity.CENTER);
@@ -257,6 +271,14 @@ public class LibraryPage {
     }
 
     private void applyMode() {
+        if (mode == MODE_HISTORY) {
+            listView.setVisibility(View.GONE);
+            albumScroll.setVisibility(View.GONE);
+            historyScroll.setVisibility(View.VISIBLE);
+            buildHistory();
+            return;
+        }
+        historyScroll.setVisibility(View.GONE);
         if (Library.isEmpty()) { refresh(); return; }
         boolean songs = mode == MODE_SONGS;
         listView.setVisibility(songs ? View.VISIBLE : View.GONE);
@@ -268,22 +290,30 @@ public class LibraryPage {
         if (listView == null) return;
         boolean has = Library.count() > 0;
 
-        emptyBox.setVisibility(has ? View.GONE : View.VISIBLE);
-        segmented.setVisibility(has ? View.VISIBLE : View.GONE);
+        emptyBox.setVisibility(has || mode == MODE_HISTORY ? View.GONE : View.VISIBLE);
+        // 「最近」即使曲库为空也有意义（在线听过的歌也在历史里）
+        segmented.setVisibility(View.VISIBLE);
         importBtn.setVisibility(has ? View.VISIBLE : View.GONE);
+        boolean hist = mode == MODE_HISTORY;
         listView.setVisibility(has && mode == MODE_SONGS ? View.VISIBLE : View.GONE);
-        albumScroll.setVisibility(has && mode != MODE_SONGS ? View.VISIBLE : View.GONE);
+        albumScroll.setVisibility(has && mode != MODE_SONGS && !hist ? View.VISIBLE : View.GONE);
+        historyScroll.setVisibility(hist ? View.VISIBLE : View.GONE);
 
         List<Song> all = new ArrayList<>(Library.songs());
         sort(all);
         listView.setData(all);
 
-        countLabel.setText(has
-                ? Library.count() + " 首 · " + Ui.duration(Library.totalDurationMs())
-                        + " · " + Library.albums().size() + " 张专辑"
-                : "还没有导入任何音乐");
+        if (mode == MODE_HISTORY) {
+            countLabel.setText(History.count() + " 首最近播放");
+        } else {
+            countLabel.setText(has
+                    ? Library.count() + " 首 · " + Ui.duration(Library.totalDurationMs())
+                            + " · " + Library.albums().size() + " 张专辑"
+                    : "还没有导入任何音乐");
+        }
 
-        if (has && mode != MODE_SONGS) buildGroups();
+        if (hist) buildHistory();
+        else if (has && mode != MODE_SONGS) buildGroups();
     }
 
     private void sort(List<Song> l) {
@@ -371,6 +401,173 @@ public class LibraryPage {
             }
         });
         return row;
+    }
+
+    // ── 最近播放 ────────────────────────────────────────────────────────────
+    private void buildHistory() {
+        Context c = act;
+        Tokens t = Theme.t();
+        historyBox.removeAllViews();
+
+        final List<Song> items = History.items();
+        if (items.isEmpty()) {
+            TextView tv = new TextView(c);
+            tv.setText("还没有播放记录。\n听过的歌会出现在这里，在线的也能直接重播。");
+            tv.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.85f));
+            tv.setTextSize(13);
+            tv.setLineSpacing(Ui.px(c, 5), 1f);
+            tv.setPadding(0, Ui.px(c, 10), 0, Ui.px(c, 10));
+            historyBox.addView(tv);
+            return;
+        }
+
+        // 顶部工具行：清空
+        LinearLayout tools = Ui.row(c);
+        tools.setPadding(0, Ui.px(c, 2), 0, Ui.px(c, 10));
+        TextView all = new TextView(c);
+        all.setText("播放全部");
+        all.setTextSize(12.5f);
+        all.setTypeface(Ui.tfBold());
+        all.setTextColor(t.onPrimary);
+        all.setPadding(Ui.px(c, 14), Ui.px(c, 8), Ui.px(c, 14), Ui.px(c, 8));
+        all.setBackground(pill(t.primary, Ui.px(c, 20)));
+        all.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Ui.hapticLight(v);
+                playFromHistory(items, 0);
+            }
+        });
+        tools.addView(all);
+
+        TextView clr = new TextView(c);
+        clr.setText("清空");
+        clr.setTextSize(12.5f);
+        clr.setTypeface(Ui.tfMed());
+        clr.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.95f));
+        clr.setPadding(Ui.px(c, 12), Ui.px(c, 8), Ui.px(c, 12), Ui.px(c, 8));
+        clr.setBackground(pill(t.surfaceContainerHigh, Ui.px(c, 20)));
+        clr.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Ui.hapticLight(v);
+                new android.app.AlertDialog.Builder(act)
+                        .setTitle("清空播放历史？")
+                        .setMessage("只是清掉记录，不会删除任何歌曲文件。")
+                        .setNegativeButton("取消", null)
+                        .setPositiveButton("清空", new android.content.DialogInterface.OnClickListener() {
+                            @Override public void onClick(android.content.DialogInterface d, int w) {
+                                History.clear(act);
+                                refresh();
+                            }
+                        }).show();
+            }
+        });
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        clp.leftMargin = Ui.px(c, 10);
+        tools.addView(clr, clp);
+        historyBox.addView(tools);
+
+        for (int i = 0; i < items.size(); i++) {
+            final int idx = i;
+            historyBox.addView(historyRow(c, t, items.get(i), new Runnable() {
+                @Override public void run() { playFromHistory(items, idx); }
+            }));
+        }
+    }
+
+    private View historyRow(Context c, Tokens t, final Song s, final Runnable onPlay) {
+        LinearLayout row = Ui.row(c);
+        row.setPadding(0, Ui.px(c, 7), 0, Ui.px(c, 7));
+
+        HomePage.CoverThumb thumb = new HomePage.CoverThumb(c, s);
+        row.addView(thumb, new LinearLayout.LayoutParams(Ui.px(c, 46), Ui.px(c, 46)));
+
+        LinearLayout col = Ui.column(c);
+        col.setPadding(Ui.px(c, 12), 0, 0, 0);
+
+        TextView title = new TextView(c);
+        title.setText(s.title);
+        title.setTextColor(t.onSurface);
+        title.setTextSize(14);
+        title.setTypeface(Ui.tfMed());
+        title.setMaxLines(1);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        col.addView(title);
+
+        // 在线歌曲标注来源，避免和本地混淆
+        String sub = s.subtitle() + " · " + s.durationText();
+        if (s.online) {
+            sub = (s.source == Song.SOURCE_KUWO ? "酷我" : "网易云") + " · " + sub;
+        }
+        TextView s2 = new TextView(c);
+        s2.setText(sub);
+        s2.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.85f));
+        s2.setTextSize(11.5f);
+        s2.setMaxLines(1);
+        s2.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        col.addView(s2);
+
+        row.addView(col, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        // 单条删除
+        HomePage.IconView del = new HomePage.IconView(c, "close",
+                Hct.withAlpha(t.onSurfaceVariant, 0.5f));
+        del.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Ui.hapticLight(v);
+                History.remove(act, s);
+                refresh();
+            }
+        });
+        row.addView(del, new LinearLayout.LayoutParams(Ui.px(c, 16), Ui.px(c, 16)));
+
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Ui.hapticLight(v);
+                if (onPlay != null) onPlay.run();
+            }
+        });
+        return row;
+    }
+
+    /**
+     * 从历史播放。
+     *
+     * <p>在线歌曲的直链是**带时效签名**的，历史里只存了元数据，
+     * 所以这里必须先重新解析一次；解析好再交给播放服务。
+     */
+    private void playFromHistory(final List<Song> items, final int index) {
+        if (items.isEmpty()) return;
+        final Song s = items.get(index);
+
+        if (!s.online) {
+            PlayerService ps = PlayerService.instance();
+            if (ps != null) ps.playList(items, index);
+            return;
+        }
+        if (s.streamUrl != null && s.streamUrl.length() > 0) {
+            PlayerService ps = PlayerService.instance();
+            if (ps != null) ps.playList(items, index);
+            return;
+        }
+
+        // 需要重新解析直链
+        android.widget.Toast.makeText(act, "正在解析「" + s.title + "」…",
+                android.widget.Toast.LENGTH_SHORT).show();
+        Online.UrlCallback cb = new Online.UrlCallback() {
+            @Override public void onResult(String url, String error) {
+                if (url != null) {
+                    PlayerService ps = PlayerService.instance();
+                    if (ps != null) ps.playList(items, index);
+                } else {
+                    android.widget.Toast.makeText(act,
+                            error == null ? "这首歌暂时放不了" : error,
+                            android.widget.Toast.LENGTH_LONG).show();
+                }
+            }
+        };
+        if (s.source == Song.SOURCE_KUWO) Kuwo.resolveUrl(act, s, cb);
+        else NetEase.resolveUrl(act, s, cb);
     }
 
     // ── MD3 分段控件 ────────────────────────────────────────────────────────
