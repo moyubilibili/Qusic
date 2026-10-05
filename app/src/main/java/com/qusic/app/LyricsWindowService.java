@@ -115,7 +115,7 @@ public class LyricsWindowService extends Service implements PlayerService.Listen
 
         lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
-                (int) (64 * getResources().getDisplayMetrics().density),
+                (int) (58 * getResources().getDisplayMetrics().density) + 24,
                 type,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
@@ -169,9 +169,24 @@ public class LyricsWindowService extends Service implements PlayerService.Listen
         @Override public void run() {
             if (view == null) return;
             view.tick(0.016f);
+            // 主歌词折成两行时胶囊会变高，这里同步把窗口高度改掉，
+            // 否则第二行会被窗口边界裁掉（长歌词显示不全的另一半原因）。
+            if (view.heightDirty() && wm != null && lp != null) {
+                lp.height = view.desiredHeight();
+                clampY();
+                try { wm.updateViewLayout(view, lp); } catch (Throwable ignored) {}
+            }
             h.postDelayed(this, 16);
         }
     };
+
+    /** 高度变化后重新夹住 Y，别让窗口跑出屏幕 */
+    private void clampY() {
+        int sh = getResources().getDisplayMetrics().heightPixels;
+        int m = (int) (6 * getResources().getDisplayMetrics().density);
+        if (lp.y < m) lp.y = m;
+        if (lp.y > sh - lp.height - m) lp.y = sh - lp.height - m;
+    }
 
     private void savePos() {
         if (lp == null) return;

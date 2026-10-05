@@ -44,6 +44,7 @@ public class LyricsOverlay extends View {
     private String nextLine = "";
     private String prevLine = "";
     private float lineAnim = 1f;        // 0..1 换行进度
+    private int mainLines = 1;          // 当前行占几行（1 或 2），决定胶囊高度
     private float breath;               // 呼吸相位
     private float controlsT;            // 0..1 控制条展开
     private boolean playing = true;
@@ -113,8 +114,17 @@ public class LyricsOverlay extends View {
         invalidate();
     }
 
+    /** 给阴影留的边距 —— 不留的话阴影会被视图边界切掉，看起来像抠图没扣干净 */
+    private float pad() { return dp(12); }
+
+    /** 当前内容需要的高度（含阴影留白） */
     public int desiredHeight() {
-        return (int) dp(64);
+        return (int) (contentHeight() + pad() * 2);
+    }
+
+    /** 胶囊本身的高度 */
+    private float contentHeight() {
+        return mainLines == 2 ? dp(80) : dp(58);
     }
 
     @Override protected void onMeasure(int wSpec, int hSpec) {
@@ -122,19 +132,32 @@ public class LyricsOverlay extends View {
         setMeasuredDimension(w, desiredHeight());
     }
 
+    /** 内容高度变化时通知外部调整窗口（返回 true 表示变了） */
+    public boolean heightDirty() {
+        int want = desiredHeight();
+        if (want != lastHeight) { lastHeight = want; return true; }
+        return false;
+    }
+    private int lastHeight;
+
     @Override protected void onDraw(Canvas c) {
         Tokens t = Theme.t();
         float w = getWidth(), h = getHeight();
         if (w <= 0 || h <= 0) return;
 
-        float r = dp(24);
-        box.set(dp(1.5f), dp(1.5f), w - dp(1.5f), h - dp(1.5f));
+        float r = dp(22);
+        float pd = pad();
+        box.set(pd, pd, w - pd, h - pd);
 
-        // ── 容器：surfaceContainerHigh + 轻投影 ──
+        // ── 容器：surfaceContainerHigh + 投影 ──
+        // 两个要点：
+        // 1. 填充必须**完全不透明**。半透明时 shadowLayer 会从填充里透上来，
+        //    在胶囊内侧糊出一圈脏边（之前「像抠图没扣全」就是这个）。
+        // 2. 胶囊要在视图内缩，给阴影留出渲染空间，否则阴影被视图边界切掉。
         p.reset();
         p.setStyle(Paint.Style.FILL);
-        p.setShadowLayer(dp(12), 0, dp(3), 0x55000000);
-        p.setColor(Hct.withAlpha(t.surfaceContainerHigh, 0.97f));
+        p.setShadowLayer(dp(9), 0, dp(3.5f), 0x40000000);
+        p.setColor(t.surfaceContainerHigh);
         c.drawRoundRect(box, r, r, p);
         p.clearShadowLayer();
 
@@ -173,41 +196,71 @@ public class LyricsOverlay extends View {
         clip.addRoundRect(box, r, r, Path.Direction.CW);
         c.clipPath(clip);
 
-        // ── 两行式排版 ──
-        // 上一行只占很窄的一条（上下居中偏上），当前行是主角，
-        // 下一行缩小放在底部。之前把「下一行」右对齐画在同一水平线上，
-        // 长歌词必然和当前行撞在一起（截图里的重影就是这个）。
-        float ea = ease(lineAnim);
+        // ── 文本排版：自动缩放 + 必要时折两行 ──
+        // 之前直接 ellipsize 截断，长句必然显示不全。
+        // 现在先把字号逐级调小试着塞进一行，实在塞不下才折成两行（胶囊会加高）。
         float contentLeft = textLeft;
         float contentRight = textRight;
-        float textW = Math.max(dp(40), contentRight - contentLeft);
+        float textW = Math.max(dp(60), contentRight - contentLeft);
 
+        float ea = ease(lineAnim);
         p.setTextAlign(Paint.Align.LEFT);
-
-        // 当前行（主角）：垂直略偏上，粗体
-        float curSize = dp(16.5f);
         p.setTypeface(Ui.tfBold());
-        p.setTextSize(curSize);
-        float curY = h * 0.44f + curSize * 0.36f;
 
-        // 旧行：向上淡出
-        if (prevLine.length() > 0 && ea < 0.98f) {
-            p.setColor(Hct.withAlpha(t.onSurface, 0.30f * (1f - ea)));
-            c.drawText(ellipsize(prevLine, p, textW), contentLeft,
-                    curY - dp(11) * ea, p);
+        // 逐级缩小找能放下的字号
+        float[] sizes = {16.5f, 15.5f, 14.5f, 13.5f, 12.5f};
+        float useSize = sizes[sizes.length - 1];
+        for (float sz : sizes) {
+            p.setTextSize(dp(sz));
+            if (p.measureText(curLine) <= textW) { useSize = sz; break; }
         }
-        // 新行：从下方浮现
-        p.setColor(Hct.withAlpha(t.onSurface, ea));
-        c.drawText(ellipsize(curLine, p, textW), contentLeft,
-                curY + dp(9) * (1f - ea), p);
+        p.setTextSize(dp(useSize));
 
-        // 下一行：缩小、淡化，压在底部，绝不与当前行同高
-        if (nextLine.length() > 0) {
+        // 最小字号仍放不下 → 折两行
+        String l1 = curLine, l2 = "";
+        boolean two = false;
+        if (p.measureText(curLine) > textW) {
+            two = true;
+            int cut = bestBreak(curLine, p, textW);
+            l1 = curLine.substring(0, cut);
+            l2 = curLine.substring(cut);
+            // 第二行再缩一点，尽量放全
+            float sz2 = useSize;
+            while (sz2 > 11f) {
+                p.setTextSize(dp(sz2));
+                if (p.measureText(l2) <= textW) break;
+                sz2 -= 0.5f;
+            }
+            useSize = sz2;
+            p.setTextSize(dp(useSize));
+        }
+        mainLines = two ? 2 : 1;
+
+        float contentH = contentHeight();
+        float cy0 = pd + (two ? contentH * 0.32f : contentH * 0.46f) + useSize * 0.36f;
+
+        // 旧行向上淡出
+        if (prevLine.length() > 0 && ea < 0.98f && !two) {
+            p.setColor(Hct.withAlpha(t.onSurface, 0.30f * (1f - ea)));
+            c.drawText(shrink(prevLine, p, textW), contentLeft, cy0 - dp(11) * ea, p);
+        }
+        // 新行（第一行）
+        p.setColor(Hct.withAlpha(t.onSurface, ea));
+        c.drawText(l1, contentLeft, cy0 + dp(8) * (1f - ea), p);
+
+        // 第二行
+        if (two) {
+            p.setColor(Hct.withAlpha(t.onSurface, 0.92f * ea));
+            c.drawText(l2, contentLeft, cy0 + dp(useSize * 1.28f), p);
+        }
+
+        // 下一行：只在主歌词是单行时显示，避免太挤
+        if (!two && nextLine.length() > 0) {
             p.setTypeface(Ui.tf());
             p.setTextSize(dp(11.5f));
             p.setColor(Hct.withAlpha(t.onSurfaceVariant, 0.55f * ea));
-            c.drawText(ellipsize(nextLine, p, textW), contentLeft,
-                    h - dp(13), p);
+            c.drawText(shrink(nextLine, p, textW), contentLeft,
+                    pd + contentH - dp(11), p);
         }
         c.restoreToCount(save);
 
@@ -236,6 +289,36 @@ public class LyricsOverlay extends View {
         c.drawCircle(cx, cy, r, p);
         Icons.draw(c, icon, new RectF(cx - r * 0.52f, cy - r * 0.52f, cx + r * 0.52f, cy + r * 0.52f),
                 Hct.withAlpha(active == 1 ? t.primary : t.onSurfaceVariant, alpha), 1f, p);
+    }
+
+    /** 找折行点：优先在空格处断，中文则按字断，避免把词劈开 */
+    private static int bestBreak(String s, Paint p, float max) {
+        int lo = 1, hi = s.length();
+        while (lo < hi) {
+            int mid = (lo + hi + 1) / 2;
+            if (p.measureText(s.substring(0, mid)) <= max) lo = mid; else hi = mid - 1;
+        }
+        int cut = Math.max(1, lo);
+        // 往回找个空格，让断点自然一点
+        for (int i = cut; i > cut - 8 && i > 1; i--) {
+            if (s.charAt(i - 1) == ' ') return i;
+        }
+        return cut;
+    }
+
+    /** 缩字号直到放得下（下限 10sp），仍放不下才截断 */
+    private static String shrink(String s, Paint p, float max) {
+        if (s == null) return "";
+        float base = p.getTextSize();
+        float sz = base;
+        while (sz > 10f) {
+            if (p.measureText(s) <= max) return s;
+            sz -= 0.5f;
+            p.setTextSize(sz);
+        }
+        String r = ellipsize(s, p, max);
+        p.setTextSize(base);
+        return r;
     }
 
     private static float ease(float x) { return x * x * (3 - 2 * x); }
