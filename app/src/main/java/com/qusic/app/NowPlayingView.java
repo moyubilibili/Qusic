@@ -80,6 +80,9 @@ public class NowPlayingView extends View implements PlayerService.Listener {
     private float lyricScroll, lyricScrollTarget;
     private float lyricsVel;              // 弹簧速度（让歌词面板有真实的加减速）
     private final RectF lyricArea = new RectF();
+    /** 抽屉歌词的滚动位置与上一次的当前行（用于缓动） */
+    private float lyricDrawY = Float.NaN;
+    private int lastDrawLine = -2;
     private int lastCurLine = -1;
     private float[] lyricLineY;      // 每行当前 y（供点击定位）
     private long[] lyricLineTime;    // 每行时间
@@ -172,7 +175,13 @@ public class NowPlayingView extends View implements PlayerService.Listener {
             if (Math.abs(breath - prev) > 0.0005f) need = true;
 
             // 歌词面板：弹簧阻尼（比指数平滑更有质感，收尾会轻微回弹）
-            if (Math.abs(lyricsPull - lyricsTarget) > 0.0008f || Math.abs(lyricsVel) > 0.0008f) {
+            // 手指正在拖的时候绝不能跑弹簧 —— 否则弹簧会把面板往旧目标拽，
+            // 和手指互相拉扯，表现就是「不跟手」。
+            boolean draggingPanel = dragging && touchMode == 3;
+            if (draggingPanel) {
+                lyricsVel = 0f;          // 拖动期间不累积速度，松手才不会甩出去
+                lyricsPull = clamp01(lyricsPull);
+            } else if (Math.abs(lyricsPull - lyricsTarget) > 0.0008f || Math.abs(lyricsVel) > 0.0008f) {
                 float k = 165f, damp = 22f;   // 更柔：慢一点、几乎不回弹
                 float acc = (lyricsTarget - lyricsPull) * k - lyricsVel * damp;
                 lyricsVel += acc * dt;
@@ -190,7 +199,7 @@ public class NowPlayingView extends View implements PlayerService.Listener {
             }
 
             if (need) invalidate();
-            postOnAnimationDelayed(frameLoop, 16);
+            postOnAnimation(frameLoop);   // 对齐 vsync；加 16ms 延迟会掉到 ~30fps
         }
     };
 
@@ -268,21 +277,32 @@ public class NowPlayingView extends View implements PlayerService.Listener {
         c.translate(0, -lp * h * 0.16f);
         c.scale(1f - lp * 0.06f, 1f - lp * 0.06f, w / 2f, h / 2f);
 
-        drawCover(c, t, coverOff, coverAlpha);
-        drawTitle(c, t);
-        drawSeek(c, t);
-        drawControls(c, t);
-        drawSecondary(c, t);
+        // 抽屉拉起过半后就不再画底层内容。
+        // 之前这里用 saveLayerAlpha 做淡出 —— 那是全屏图层，每帧都要分配一块
+        // 和屏幕一样大的缓冲，是上滑卡顿的主因。直接不画更便宜也更干净。
+        if (lp <= 0.5f) {
+            drawCover(c, t, coverOff, coverAlpha);
+            drawTitle(c, t);
+            drawSeek(c, t);
+            drawControls(c, t);
+            drawSecondary(c, t);
+        }
         c.restoreToCount(save);
 
         // 歌词页 / 极简页：在控件下方铺一整块滚动歌词
         if (style != STYLE_COVER && lp < 0.5f) {
-            float top = style == STYLE_LYRICS
-                    ? subtitleY + dp(26)
-                    : seekCy + dp(34);
+            // 关键：两种样式的歌词区都必须从**进度条下方**开始。
+            // 之前歌词页用的是 subtitleY + 26dp，而进度条在 subtitleY + 40dp，
+            // 于是歌词直接压在进度条和时长上（就是「叠在一起」的那个现象）。
+            float top = seekCy + dp(34);
             RectF area = new RectF(dp(28), top, w - dp(28), bottomControlsTop() - dp(10));
             lyricArea.set(area);
-            if (area.height() > dp(40)) drawLyricsFull(c, t, area, 1f);
+            if (area.height() > dp(40)) {
+                // 不要在这里铺任何背景块 —— 哪怕只有 24dp 高，也会在上下形成
+                // 两条肉眼可见的硬边，看起来像「贴了一块不属于这个图层的东西」。
+                // 改成让歌词文字自己在区域上下边缘淡出，整页浑然一体。
+                drawLyricsFull(c, t, area, 1f);
+            }
         }
 
         drawLyrics(c, t, lp);
@@ -556,11 +576,13 @@ public class NowPlayingView extends View implements PlayerService.Listener {
         c.drawRoundRect(new RectF(w / 2f - hbW / 2, hbY, w / 2f + hbW / 2, hbY + dp(4.5f)),
                 dp(3), dp(3), p);
 
-        float top = Ui.statusBarHeight(getContext()) + dp(70);
+        // 标签要放在返回按钮**下方**：按钮底边是 statusH + 52，原来画在 top-18
+        // 正好被按钮压住。现在把标签下移，歌词再往下让一点。
+        float top = Ui.statusBarHeight(getContext()) + dp(76);
         p.reset(); p.setTextAlign(Paint.Align.LEFT);
         p.setTypeface(Ui.tfBold()); p.setTextSize(dp(13));
         p.setColor(Hct.withAlpha(0xFFFFFFFF, 0.55f * lp));
-        c.drawText("歌词", dp(24), top - dp(18), p);
+        c.drawText("歌词", dp(24), top - dp(10), p);
 
         if (song == null) { c.restoreToCount(save); return; }
 
@@ -577,26 +599,69 @@ public class NowPlayingView extends View implements PlayerService.Listener {
             return;
         }
         long cur = posMs;
-        String[] lines = lyr.split("\n");
 
-        // 找当前行（有时间轴则按时间，否则按播放进度比例）
+        // 用缓存好的折行结果，别每帧 split + wrap ——
+        // 那是上滑动画一卡一卡的元凶（每帧都在分配大量临时对象，触发 GC）。
+        float maxTextW = w - dp(56);
+        boolean ready = prepareLyrics(maxTextW);
+        String[] lines = ready ? lyricLines : lyr.split("\n");
+        String[][] wrapped = ready ? lyricWrapped : null;
+
+        // 找当前行：取「最后一个时间戳 <= 当前进度」的行。
+        // 注意不要写成 `cur <= times[i] → i-1`，那样开头会把当前行算成最后一行。
         int curLine = -1;
         long[] times = Lyrics.timesFor(song);
         if (times != null && times.length == lines.length) {
-            for (int i = 0; i < times.length; i++) if (cur <= times[i]) { curLine = i - 1; break; }
-            if (curLine < 0) curLine = times.length - 1;
+            for (int i = 0; i < times.length; i++) {
+                if (cur >= times[i]) curLine = i;
+                else break;
+            }
+        } else if (durMs > 0) {
+            // 无时间轴：按播放进度比例估算
+            curLine = (int) ((float) posMs / durMs * lines.length);
+            if (curLine >= lines.length) curLine = lines.length - 1;
         }
 
         p.setTypeface(Ui.tfMed());
         float lh = dp(34);
-        float y = top + dp(20);
         float cx = dp(24);
+
+        // ── 关键：以当前行为锚点整体滚动 ──
+        // 之前这里只是从 top 开始顺序往下画，当前行跑到屏幕外也照样从第 0 行画起，
+        // 表现就是「歌词永远停在开头、不跟着播放走」。
+        float viewTop = top + dp(16);
+        float viewBottom = h - dp(70);
+        float anchor = viewTop + (viewBottom - viewTop) * 0.30f;   // 当前行停在这
+        float target = curLine < 0 ? viewTop : anchor - curLine * lh;
+
+        // 平滑跟随：目标位置由当前行推出，用缓动逼近，避免换行时跳变。
+        // 首帧（NaN）直接落位，否则 NaN 会一路传播下去。
+        if (Float.isNaN(lyricDrawY)) lyricDrawY = target;
+        lyricDrawY += (target - lyricDrawY) * (lastDrawLine != curLine ? 0.20f : 0.10f);
+        lastDrawLine = curLine;
+        if (Math.abs(lyricDrawY - target) < 0.5f) lyricDrawY = target;
+        float y = lyricDrawY;
+
         int count = 0;
         for (int i = 0; i < lines.length; i++) {
-            if (y > h - dp(70)) break;
+            // 行高（含长行折行）预估一下，用于跳过屏幕外的行
+            if (y > viewBottom) break;
+            if (y < viewTop - lh * 2.2f) {
+                String skip = lines[i].trim();
+                if (skip.length() == 0) { y += lh * 0.5f; continue; }
+                int n = (wrapped != null && i < wrapped.length && wrapped[i] != null
+                        && wrapped[i].length > 0) ? wrapped[i].length : 1;
+                y += lh * 0.95f * n;
+                continue;
+            }
             boolean isCur = i == curLine;
-            // 逐行错落：靠上的行先出现，形成「一层层浮上来」的感觉
-            float stagger = Math.max(0f, Math.min(1f, (lp - i * 0.045f) / 0.55f));
+            // 逐行错落：靠上的行先浮现。
+            // 注意延迟必须封顶并重新归一化 —— 之前写成 (lp - i*0.045)/0.55，
+            // 抽屉完全展开（lp=1）时第 22 行以后恒为 0，那些行永远不会被画出来，
+            // 而当前行往往正好在后面。
+            float delay = Math.min(0.6f, i * 0.035f);
+            float stagger = (lp - delay) / Math.max(0.25f, 1f - delay);
+            stagger = Math.max(0f, Math.min(1f, stagger));
             stagger = stagger * stagger * (3 - 2 * stagger);
             if (stagger <= 0.01f) { y += lh; continue; }
             p.setTextSize(dp(isCur ? 20 : 17));
@@ -605,8 +670,10 @@ public class NowPlayingView extends View implements PlayerService.Listener {
             p.setTypeface(isCur ? Ui.tfBold() : Ui.tfMed());
             String line = lines[i].trim();
             if (line.length() == 0) { y += lh * 0.5f; continue; }
-            // 长行换行
-            for (String seg : wrap(line, p, w - dp(48))) {
+            // 折行结果已缓存（没有缓存时退回即时折行，只发生在首帧）
+            String[] segs = (wrapped != null && i < wrapped.length && wrapped[i] != null)
+                    ? wrapped[i] : wrap(line, p, maxTextW).toArray(new String[0]);
+            for (String seg : segs) {
                 c.drawText(seg, cx, y, p);
                 y += lh * (isCur ? 1.05f : 0.95f);
             }
@@ -876,6 +943,8 @@ public class NowPlayingView extends View implements PlayerService.Listener {
         song = s;
         loadCover();
         lyricsScroll = 0;
+        lyricDrawY = Float.NaN;   // 换歌重置滚动，避免从上一首的位置滑过来
+        lastDrawLine = -2;
         invalidate();
         loadLyricsAsync();
     }
@@ -1042,9 +1111,28 @@ public class NowPlayingView extends View implements PlayerService.Listener {
             // 距离当前行的远近决定透明度与大小
             float d = Math.min(1f, Math.abs(i - cur) / 5f);
             float a = (isCur ? 1f : 0.42f * (1f - d * 0.75f)) * alpha;
+
+            // 在区域上下边缘让**文字自己**淡出。
+            // 之前这里是在画完文字后盖两块写死的黑色矩形（0x66000000 / 0x77000000），
+            // 结果就是一条左右带硬边的黑带，和底图完全不是一个图层。
+            float edge = 1f;
+            if (area.height() > 1f) {
+                float rel = (y - area.top) / area.height();
+                if (rel < 0.12f) edge = rel / 0.12f;
+                else if (rel > 0.88f) edge = (1f - rel) / 0.12f;
+                edge = edge < 0f ? 0f : (edge > 1f ? 1f : edge);
+            }
+            if (edge <= 0.02f) {
+                String[] sk = (lyricWrapped != null && i < lyricWrapped.length)
+                        ? lyricWrapped[i] : new String[0];
+                y += lh * 0.92f * Math.max(1, sk.length);
+                continue;
+            }
+            a *= edge;
+
             p.setTypeface(isCur ? Ui.tfBold() : Ui.tfMed());
             p.setTextSize(dp(isCur ? 19 : 15.5f));
-            p.setColor(isCur ? 0xFFFFFFFF : Hct.withAlpha(0xFFFFFFFF, a));
+            p.setColor(isCur ? Hct.withAlpha(0xFFFFFFFF, edge) : Hct.withAlpha(0xFFFFFFFF, a));
             String[] segs = (lyricWrapped != null && i < lyricWrapped.length)
                     ? lyricWrapped[i] : new String[0];
             for (String seg : segs) {
@@ -1052,24 +1140,17 @@ public class NowPlayingView extends View implements PlayerService.Listener {
                 y += lh * 0.92f;
             }
             if (isCur) {
-                // 当前行左侧一道强调色竖条
+                // 当前行左侧一道强调色竖条（同样跟着边缘淡出）
                 p.reset(); p.setStyle(Paint.Style.FILL);
-                p.setColor(Hct.withAlpha(coverAccent != 0 ? coverAccent : Theme.t().primary, 0.95f));
+                p.setColor(Hct.withAlpha(coverAccent != 0 ? coverAccent : Theme.t().primary,
+                        0.95f * edge));
                 c.drawRoundRect(new RectF(area.left - dp(12), y - lh * 0.75f,
                         area.left - dp(9), y - lh * 0.75f + dp(16)), dp(2), dp(2), p);
             }
         }
         c.restoreToCount(save);
-
-        // 上下渐隐，视觉上像无限滚动
-        p.reset();
-        p.setShader(new LinearGradient(0, area.top, 0, area.top + dp(26),
-                new int[]{0x66000000, 0x00000000}, null, Shader.TileMode.CLAMP));
-        c.drawRect(area.left, area.top, area.right, area.top + dp(26), p);
-        p.setShader(new LinearGradient(0, area.bottom - dp(30), 0, area.bottom,
-                new int[]{0x00000000, 0x77000000}, null, Shader.TileMode.CLAMP));
-        c.drawRect(area.left, area.bottom - dp(30), area.right, area.bottom, p);
-        p.setShader(null);
+        // 这里原来盖了两块写死的黑色矩形做「上下渐隐」，
+        // 会在歌词区上下形成两条左右带硬边的黑带。已改为文字自身按位置淡出。
     }
 
 }

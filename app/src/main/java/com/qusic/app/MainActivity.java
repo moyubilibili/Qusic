@@ -62,6 +62,8 @@ public class MainActivity extends Activity implements PlayerService.Listener {
 
     private final ServiceConnection conn = new ServiceConnection() {
         @Override public void onServiceConnected(ComponentName n, IBinder b) {
+            // 服务连上了：让迷你播放条补一次状态同步（它在视图挂载时可能还没服务）
+            if (miniBar != null) miniBar.attachToService();
             player = ((PlayerService.Local) b).svc();
             bound = true;
             player.addListener(MainActivity.this);

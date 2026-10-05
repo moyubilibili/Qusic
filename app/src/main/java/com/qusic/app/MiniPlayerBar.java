@@ -54,22 +54,53 @@ public class MiniPlayerBar extends View implements PlayerService.Listener {
 
     @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        if (PlayerService.instance() != null) PlayerService.instance().addListener(this);
+        attachToService();
+    }
+
+    /**
+     * 绑定到播放服务并同步一次状态。
+     *
+     * <p>可以重复调用 —— MainActivity 的 bindService 是异步的，
+     * 视图挂载时服务通常还没连上，所以要等 onServiceConnected 再调一次。
+     * 之前只在 onAttachedToWindow 里读一次，服务没起来就再也不更新，
+     * 结果 song 永远为 null、appear 保持 0、高度算出来是 0，
+     * 表现就是「迷你播放条整个不见了」。
+     */
+    public void attachToService() {
+        PlayerService s = PlayerService.instance();
+        if (s != null && !listening) {
+            s.addListener(this);
+            listening = true;
+        }
         syncFromService();
     }
 
+    private boolean listening;
+
     @Override protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        if (PlayerService.instance() != null) PlayerService.instance().removeListener(this);
+        if (listening) {
+            PlayerService s = PlayerService.instance();
+            if (s != null) s.removeListener(this);
+            listening = false;
+        }
     }
 
     private void syncFromService() {
         PlayerService s = PlayerService.instance();
-        if (s == null) return;
-        song = s.current();
-        playing = s.isPlaying();
-        int d = s.duration();
-        progress = d > 0 ? (float) s.position() / d : 0f;
+        if (s != null) {
+            song = s.current();
+            playing = s.isPlaying();
+            int d = s.duration();
+            progress = d > 0 ? (float) s.position() / d : 0f;
+        } else {
+            // 服务还没连上：退回静态快照。这些字段是 static 的，
+            // 即便 Activity 重建、服务尚未绑定，当前曲目信息依然有效。
+            song = PlayerService.sCurrent;
+            playing = PlayerService.sPlaying;
+            long d = PlayerService.sDuration;
+            progress = d > 0 ? (float) PlayerService.sPosition / d : 0f;
+        }
         loadCover();
         animateAppear(song != null);
         invalidate();
