@@ -23,8 +23,7 @@ import java.util.List;
 public class SearchPage {
 
     // 0=本地 1=酷我 2=网易云
-    private static final int SRC_LOCAL = 0, SRC_KUWO = 1, SRC_KUGOU = 2,
-            SRC_NETEASE = 3;
+    private static final int SRC_LOCAL = 0, SRC_KUWO = 1, SRC_NETEASE = 2;
 
     private final MainActivity act;
     private View root;
@@ -70,7 +69,7 @@ public class SearchPage {
         header.addView(title);
 
         // 来源切换
-        srcBar = new LibraryPage.SegmentedBar(c, new String[]{"本地", "酷我", "酷狗", "网易云"});
+        srcBar = new LibraryPage.SegmentedBar(c, new String[]{"本地", "酷我", "网易云"});
         srcBar.setOnChange(new LibraryPage.SegmentedBar.OnChange() {
             @Override public void onChange(int i) {
                 if (source == i) return;
@@ -186,9 +185,8 @@ public class SearchPage {
 
     /** 当前在线来源的名字 */
     private String sourceName() {
-        return Online.sourceName(source == SRC_KUWO ? Song.SOURCE_KUWO
-                : source == SRC_KUGOU ? Song.SOURCE_KUGOU
-                : Song.SOURCE_NETEASE);
+        return Online.sourceName(source == SRC_KUWO
+                ? Song.SOURCE_KUWO : Song.SOURCE_NETEASE);
     }
 
     /** 按来源分发搜索 */
@@ -201,7 +199,6 @@ public class SearchPage {
             }
         };
         if (source == SRC_KUWO) Kuwo.search(act, kw, cb);
-        else if (source == SRC_KUGOU) Kugou.search(act, kw, cb);
         else NetEase.search(act, kw, cb);
     }
 
@@ -223,7 +220,6 @@ public class SearchPage {
             }
         };
         if (source == SRC_KUWO) Kuwo.resolveUrl(act, s, cb);
-        else if (source == SRC_KUGOU) Kugou.resolveUrl(act, s, cb);
         else NetEase.resolveUrl(act, s, cb);
     }
 
