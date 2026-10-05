@@ -175,6 +175,154 @@ public final class Playlist {
         return c;
     }
 
+    // ── .Qusic 导入 / 导出 ──────────────────────────────────────────────────
+    /** 文件后缀。用大写 Q 开头，辨识度高，也方便在社群里认出来 */
+    public static final String EXT = ".Qusic";
+    public static final String MIME = "application/json";
+    private static final int FORMAT_VERSION = 1;
+
+    /**
+     * 导出成 .Qusic 文本。
+     *
+     * <p>格式是自描述的 JSON，带了 {@code format} 和 {@code version} 两个字段，
+     * 以后改结构时可以据此做兼容处理，而不是遇到老文件就崩。
+     *
+     * <p>在线歌曲只导出**元数据**，不导出播放直链 —— 直链带时效签名，
+     * 导出去给别人也是一放就失效。
+     */
+    public static String exportJson(Item it) {
+        try {
+            JSONObject root = new JSONObject();
+            root.put("format", "Qusic");
+            root.put("version", FORMAT_VERSION);
+            root.put("name", it.name);
+            root.put("created", it.created);
+            root.put("exportedAt", System.currentTimeMillis());
+            root.put("count", it.songs.size());
+            JSONArray arr = new JSONArray();
+            for (Song s : it.songs) {
+                JSONObject o = new JSONObject();
+                o.put("title", s.title == null ? "" : s.title);
+                o.put("artist", s.artist == null ? "" : s.artist);
+                o.put("album", s.album == null ? "" : s.album);
+                o.put("duration", s.durationMs);
+                o.put("source", s.source);
+                o.put("online", s.online);
+                o.put("platformId", s.neteaseId);
+                o.put("hash", s.mime == null ? "" : s.mime);   // 酷狗用
+                o.put("uri", s.uri == null ? "" : s.uri);
+                o.put("coverUrl", s.coverUrl == null ? "" : s.coverUrl);
+                arr.put(o);
+            }
+            root.put("songs", arr);
+            return root.toString(2);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 导入结果 */
+    public static class ImportResult {
+        public Item item;
+        public String error;
+        public int total;      // 文件里的歌曲数
+        public int matched;    // 能在本机曲库里找到的本地歌曲数
+    }
+
+    /**
+     * 解析 .Qusic 文本。
+     *
+     * <p>本地歌曲会尝试按「文件名 / 标题+歌手」匹配本机已有的曲库 ——
+     * 因为 SAF 的 URI 是**每台设备各自授权**的，别人导出给你的本地歌曲路径在你这里必然无效。
+     * 匹配不上的不丢弃，仍然保留条目并标注出来，让用户自己决定。
+     */
+    public static ImportResult parseImport(String text, String fallbackName) {
+        ImportResult r = new ImportResult();
+        try {
+            if (text == null || text.trim().length() == 0) {
+                r.error = "文件是空的";
+                return r;
+            }
+            JSONObject root = new JSONObject(text.trim());
+            String fmt = root.optString("format", "");
+            if (!"Qusic".equalsIgnoreCase(fmt)) {
+                r.error = "这不是一个 Qusic 歌单文件";
+                return r;
+            }
+            int ver = root.optInt("version", 0);
+            if (ver > FORMAT_VERSION) {
+                r.error = "这个歌单来自更新的版本（v" + ver + "），请先升级应用";
+                return r;
+            }
+            Item it = new Item();
+            it.id = System.currentTimeMillis();
+            it.created = root.optLong("created", it.id);
+            String nm = root.optString("name", "");
+            it.name = (nm == null || nm.trim().length() == 0)
+                    ? (fallbackName == null ? "导入的歌单" : fallbackName) : nm.trim();
+
+            JSONArray arr = root.optJSONArray("songs");
+            if (arr == null) { r.error = "文件里没有歌曲列表"; return r; }
+            r.total = arr.length();
+
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject o = arr.getJSONObject(i);
+                Song s = new Song();
+                s.title = o.optString("title", "未知曲目");
+                s.artist = o.optString("artist", "");
+                s.album = o.optString("album", "");
+                s.durationMs = o.optLong("duration");
+                s.source = o.optInt("source", Song.SOURCE_LOCAL);
+                s.online = o.optBoolean("online", false);
+                s.neteaseId = o.optLong("platformId");
+                s.mime = o.optString("hash", "");
+                s.uri = o.optString("uri", "");
+                s.path = s.uri;
+                s.coverUrl = o.optString("coverUrl", "");
+                s.id = o.optLong("id", 0);
+                if (s.id == 0) s.id = s.online ? -Math.abs(s.neteaseId) : Math.abs(s.uri.hashCode());
+
+                if (!s.online) {
+                    // 本地歌曲：URI 是别人设备上的授权，在自己这儿多半无效。
+                    // 尝试按「标题 + 歌手」在本地曲库里找一首对得上的。
+                    Song hit = matchLocal(s);
+                    if (hit != null) { s = hit; r.matched++; }
+                }
+                it.songs.add(s);
+            }
+            r.item = it;
+            return r;
+        } catch (Throwable t) {
+            r.error = "歌单文件解析失败：" + t.getClass().getSimpleName();
+            return r;
+        }
+    }
+
+    /** 在本机曲库里按标题+歌手找同名歌曲 */
+    private static Song matchLocal(Song want) {
+        try {
+            for (Song s : Library.songs()) {
+                if (eq(s.title, want.title) && (eq(s.artist, want.artist) || want.artist.length() == 0)) {
+                    return s;
+                }
+            }
+        } catch (Throwable ignored) {}
+        return null;
+    }
+
+    private static boolean eq(String a, String b) {
+        return a != null && b != null && a.trim().equalsIgnoreCase(b.trim());
+    }
+
+    /** 建议的导出文件名（去掉不适合当文件名的字符） */
+    public static String suggestFileName(Item it) {
+        String n = it == null || it.name == null ? "歌单" : it.name;
+        n = n.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
+        if (n.length() == 0) n = "歌单";
+        if (n.length() > 40) n = n.substring(0, 40);
+        return n + EXT;
+    }
+
     // ── 添加到歌单的界面（曲库页和播放页共用）────────────────────────────
     /**
      * 弹出「添加这首歌到哪个歌单」。
@@ -214,21 +362,16 @@ public final class Playlist {
     /** 新建歌单并添加这首歌 */
     public static void askNameAndCreate(final android.app.Activity act, final Song song,
                                         final Runnable onChanged) {
-        final android.widget.EditText et = new android.widget.EditText(act);
-        et.setHint("歌单名字");
-        et.setTextSize(15);
-        et.setSingleLine(true);
-        int pad = (int) (20 * act.getResources().getDisplayMetrics().density);
-        android.widget.FrameLayout box = new android.widget.FrameLayout(act);
-        box.setPadding(pad, pad / 2, pad, 0);
-        box.addView(et);
+        // MD3 输入框：系统 EditText 放进 AlertDialog 是 Material 1 的样子，跟界面不搭
+        final MdField et = new MdField(act, "歌单名字");
+        et.focus();
         new android.app.AlertDialog.Builder(act)
                 .setTitle(song == null ? "新建歌单" : "新建歌单并添加")
-                .setView(box)
+                .setView(et)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("创建", new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int w) {
-                        Item it = create(act, et.getText().toString());
+                        Item it = create(act, et.text());
                         if (song != null) add(act, it.id, song);
                         android.widget.Toast.makeText(act, "已添加到「" + it.name + "」",
                                 android.widget.Toast.LENGTH_SHORT).show();

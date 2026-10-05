@@ -470,7 +470,8 @@ public class LibraryPage {
     }
 
     private void buildPlaylistIndex(Context c, Tokens t) {
-        // 新建
+        // 新建 / 导入
+        LinearLayout acts = Ui.row(c);
         TextView nw = new TextView(c);
         nw.setText("＋ 新建歌单");
         nw.setTextSize(13);
@@ -482,8 +483,25 @@ public class LibraryPage {
         nw.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { Ui.hapticLight(v); askCreatePlaylist(); }
         });
-        plBox.addView(nw, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        acts.addView(nw, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView imp = new TextView(c);
+        imp.setText("导入 .Qusic");
+        imp.setTextSize(13);
+        imp.setTypeface(Ui.tfMed());
+        imp.setTextColor(t.onSecondaryContainer);
+        imp.setGravity(Gravity.CENTER);
+        imp.setPadding(0, Ui.px(c, 12), 0, Ui.px(c, 12));
+        imp.setBackground(pill(t.secondaryContainer, Ui.px(c, 14)));
+        imp.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { Ui.hapticLight(v); act.importPlaylist(); }
+        });
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        ilp.leftMargin = Ui.px(c, 10);
+        acts.addView(imp, ilp);
+        plBox.addView(acts);
 
         List<Playlist.Item> lists = Playlist.all();
         if (lists.isEmpty()) {
@@ -568,6 +586,7 @@ public class LibraryPage {
         });
         head.addView(back);
 
+        final Playlist.Item cur = it;
         TextView title = new TextView(c);
         title.setText(it.name);
         title.setTextSize(15);
@@ -599,6 +618,19 @@ public class LibraryPage {
             alp.leftMargin = Ui.px(c, 8);
             head.addView(all, alp);
         }
+
+        // 导出
+        HomePage.IconView exp = new HomePage.IconView(c, "note",
+                Hct.withAlpha(t.onSurfaceVariant, 0.75f));
+        exp.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Ui.hapticLight(v);
+                act.exportPlaylist(cur.id);
+            }
+        });
+        LinearLayout.LayoutParams elp = new LinearLayout.LayoutParams(Ui.px(c, 18), Ui.px(c, 18));
+        elp.leftMargin = Ui.px(c, 10);
+        head.addView(exp, elp);
         plBox.addView(head);
 
         if (it.size() == 0) {
@@ -673,21 +705,14 @@ public class LibraryPage {
 
     /** 新建歌单 */
     private void askCreatePlaylist() {
-        final EditText et = new EditText(act);
-        et.setHint("歌单名字");
-        et.setTextSize(15);
-        et.setSingleLine(true);
-        int pad = Ui.px(act, 20);
-        android.widget.FrameLayout box = new android.widget.FrameLayout(act);
-        box.setPadding(pad, Ui.px(act, 8), pad, 0);
-        box.addView(et);
+        final MdField et = new MdField(act, "歌单名字");
         new android.app.AlertDialog.Builder(act)
                 .setTitle("新建歌单")
-                .setView(box)
+                .setView(et)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("创建", new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int w) {
-                        Playlist.create(act, et.getText().toString());
+                        Playlist.create(act, et.text());
                         refresh();
                     }
                 }).show();
@@ -697,30 +722,26 @@ public class LibraryPage {
     private void playlistMenu(final Playlist.Item it) {
         new android.app.AlertDialog.Builder(act)
                 .setTitle(it.name)
-                .setItems(new String[]{"重命名", "删除歌单"}, new android.content.DialogInterface.OnClickListener() {
+                .setItems(new String[]{"导出为 .Qusic", "重命名", "删除歌单"},
+                        new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int which) {
-                        if (which == 0) askRenamePlaylist(it);
+                        if (which == 0) act.exportPlaylist(it.id);
+                        else if (which == 1) askRenamePlaylist(it);
                         else askDeletePlaylist(it);
                     }
                 }).show();
     }
 
     private void askRenamePlaylist(final Playlist.Item it) {
-        final EditText et = new EditText(act);
+        final MdField et = new MdField(act, "歌单名字");
         et.setText(it.name);
-        et.setTextSize(15);
-        et.setSingleLine(true);
-        int pad = Ui.px(act, 20);
-        android.widget.FrameLayout box = new android.widget.FrameLayout(act);
-        box.setPadding(pad, Ui.px(act, 8), pad, 0);
-        box.addView(et);
         new android.app.AlertDialog.Builder(act)
                 .setTitle("重命名歌单")
-                .setView(box)
+                .setView(et)
                 .setNegativeButton("取消", null)
                 .setPositiveButton("保存", new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int w) {
-                        Playlist.rename(act, it.id, et.getText().toString());
+                        Playlist.rename(act, it.id, et.text());
                         refresh();
                     }
                 }).show();

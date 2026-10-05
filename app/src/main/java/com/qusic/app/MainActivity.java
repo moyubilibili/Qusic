@@ -43,6 +43,14 @@ public class MainActivity extends Activity implements PlayerService.Listener {
 
     /** 导入音乐的 requestCode */
     public static final int REQ_IMPORT = 2001;
+    /** 导出歌单到 .Qusic */
+    public static final int REQ_EXPORT_PLAYLIST = 3001;
+    /** 从 .Qusic 导入歌单 */
+    public static final int REQ_IMPORT_PLAYLIST = 3002;
+    public static final int REQ_PICK_AUDIO_PERM = 4001;
+    /** 待导出的歌单（SAF 异步返回，得先记住内容） */
+    private long pendingExportId;
+    private String pendingExportJson;
 
     private FrameLayout root;
     private FrameLayout pageHost;
@@ -417,6 +425,54 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         });
     }
 
+    // ── .Qusic 歌单导入导出 ────────────────────────────────────────────────
+    /** 导出某个歌单：让用户选保存位置，文件名默认「歌单名.Qusic」 */
+    public void exportPlaylist(long id) {
+        Playlist.Item it = Playlist.byId(id);
+        if (it == null) { Toast.makeText(this, "歌单不存在了", Toast.LENGTH_SHORT).show(); return; }
+        if (it.size() == 0) { Toast.makeText(this, "空歌单没什么可导出的", Toast.LENGTH_SHORT).show(); return; }
+        String json = Playlist.exportJson(it);
+        if (json == null) { Toast.makeText(this, "导出失败", Toast.LENGTH_SHORT).show(); return; }
+        pendingExportId = id;
+        pendingExportJson = json;
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType(Playlist.MIME);
+        i.putExtra(Intent.EXTRA_TITLE, Playlist.suggestFileName(it));
+        try {
+            startActivityForResult(i, REQ_EXPORT_PLAYLIST);
+        } catch (Throwable t) {
+            Toast.makeText(this, "没有可用的文件管理器", Toast.LENGTH_LONG).show();
+        }
+    }
+
+
+    /** 导入 .Qusic */
+    public void importPlaylist() {
+        Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        // 有些文件管理器对自定义后缀会过滤掉，两种 mime 都收
+        i.setType("*/*");
+        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{Playlist.MIME, "text/plain", "*/*"});
+        try {
+            startActivityForResult(i, REQ_IMPORT_PLAYLIST);
+        } catch (Throwable t) {
+            Toast.makeText(this, "没有可用的文件管理器", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** SAF 返回的 Uri → 文本 */
+    private String readUri(android.net.Uri uri) throws Exception {
+        java.io.InputStream in = getContentResolver().openInputStream(uri);
+        if (in == null) return null;
+        java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int n;
+        while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
+        in.close();
+        return new String(bos.toByteArray(), "UTF-8");
+    }
+
     /** 供「关于」页调用 */
     public void checkForUpdatesManually() { checkForUpdates(true); }
 
@@ -435,6 +491,76 @@ public class MainActivity extends Activity implements PlayerService.Listener {
 
     @Override protected void onActivityResult(int req, int result, Intent data) {
         super.onActivityResult(req, result, data);
+
+        // ── 导出歌单 ──
+        if (req == REQ_EXPORT_PLAYLIST) {
+            if (result != RESULT_OK || data == null || data.getData() == null) return;
+            try {
+                java.io.OutputStream os = getContentResolver().openOutputStream(data.getData());
+                if (os == null) throw new java.io.IOException("无法写入");
+                os.write(pendingExportJson.getBytes("UTF-8"));
+                os.flush();
+                os.close();
+                Playlist.Item it = Playlist.byId(pendingExportId);
+                Toast.makeText(this, "已导出"
+                        + (it == null ? "" : "「" + it.name + "」")
+                        + "，可以发给别人了", Toast.LENGTH_LONG).show();
+            } catch (Throwable t) {
+                Toast.makeText(this, "导出失败：" + t.getClass().getSimpleName(),
+                        Toast.LENGTH_LONG).show();
+            }
+            pendingExportJson = null;
+            return;
+        }
+
+        // ── 导入歌单 ──
+        if (req == REQ_IMPORT_PLAYLIST) {
+            if (result != RESULT_OK || data == null || data.getData() == null) return;
+            android.net.Uri u = data.getData();
+            try {
+                String text = readUri(u);
+                // 从文件名兜底取歌单名
+                String fallback = null;
+                String last = u.getLastPathSegment();
+                if (last != null) {
+                    int slash = last.lastIndexOf('/');
+                    if (slash >= 0) last = last.substring(slash + 1);
+                    if (last.toLowerCase().endsWith(Playlist.EXT.toLowerCase())) {
+                        last = last.substring(0, last.length() - Playlist.EXT.length());
+                    }
+                    if (last.trim().length() > 0) fallback = last.trim();
+                }
+                Playlist.ImportResult r = Playlist.parseImport(text, fallback);
+                if (r.error != null) {
+                    Toast.makeText(this, r.error, Toast.LENGTH_LONG).show();
+                    return;
+                }
+                // 同名歌单加个后缀，避免看着像覆盖了
+                String base = r.item.name;
+                String name = base;
+                int n = 2;
+                for (Playlist.Item e : Playlist.all()) {
+                    if (e.name.equals(name)) { name = base + " (" + n + ")"; n++; }
+                }
+                r.item.name = name;
+                Playlist.Item created = Playlist.create(this, name);
+                int ok = 0;
+                for (Song sg : r.item.songs) {
+                    if (Playlist.add(this, created.id, sg)) ok++;
+                }
+                refreshAllPages();
+                String msg = "已导入「" + name + "」：" + ok + " 首";
+                if (!r.item.songs.isEmpty() && !r.item.songs.get(0).online) {
+                    msg += "（本地歌曲按标题+歌手匹配，换了设备可能对不上）";
+                }
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+            } catch (Throwable t) {
+                Toast.makeText(this, "导入失败：" + t.getClass().getSimpleName(),
+                        Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
+
         if (req != REQ_IMPORT || result != RESULT_OK || data == null) return;
 
         final java.util.List<android.net.Uri> uris = new java.util.ArrayList<>();
