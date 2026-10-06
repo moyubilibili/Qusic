@@ -52,7 +52,16 @@ public class SongListView extends View implements PlayerService.Listener {
 
     private float scrollY = 0f;       // 当前滚动偏移（px）
     private float maxScroll = 0f;
-    private float overscroll = 0f;    // 回弹偏移
+    private float overscroll = 0f;    // 超出边界的偏移（正=顶部下拉，负=底部上拉）
+    private float overV = 0f;         // overscroll 的速度，弹簧用
+    /** 未阻尼的原始超出量。必须单独记 —— 拿阻尼后的值当基数会让阻尼失效 */
+    private float overRaw = 0f;
+    /** 顶部渐隐的渐变对象缓存（每帧 new 会制造 GC 抖动） */
+    private LinearGradient fadeShader;
+    private int fadeKey = 0;
+    /** 无封面时占位渐变的缓存 */
+    private LinearGradient phShader;
+    private Tokens phTheme;
 
     private float downY, downX;
     private float lastY;
@@ -60,6 +69,19 @@ public class SongListView extends View implements PlayerService.Listener {
     private float touchSlop;
     private VelocityTracker vt;
     private float velocity;
+
+    /**
+     * 惯性交给系统的 {@link android.widget.OverScroller}。
+     *
+     * <p>之前是自己写指数摩擦，调来调去都不对 —— 而「关于」等页面用的是系统
+     * ScrollView，手感天然一致。既然系统已经有一流的滑动物理，就没必要重造：
+     * 这样曲库的滑动跟其他页面**完全一样**。
+     *
+     * <p>OverScroller 还顺带处理了「冲过边界再弹回来」（overY 参数），
+     * 比手写弹簧更自然。
+     */
+    private android.widget.OverScroller flinger;
+    private boolean flinging = false;
     private int pressed = -1;
     private float pressAnim = 0f;
 
@@ -90,7 +112,12 @@ public class SongListView extends View implements PlayerService.Listener {
     public SongListView(Context c) {
         super(c);
         touchSlop = Ui.dp(c, 8);
-        setLayerType(LAYER_TYPE_HARDWARE, null);
+        flinger = new android.widget.OverScroller(c);
+        // 这个 View 自己画所有内容，不需要系统帮它做硬件层缓存。
+        // 之前这里是 LAYER_TYPE_HARDWARE —— 那是给「内容不变、只做位移/透明」
+        // 的 View 用的；列表内容每次滚动都在变，缓存层每帧都要重画一遍，
+        // 反而多一次离屏合成。
+        setLayerType(LAYER_TYPE_NONE, null);
         startLoop();
     }
 
@@ -106,6 +133,7 @@ public class SongListView extends View implements PlayerService.Listener {
             scrollY = 0;
             overscroll = 0;
             entrance = 0f;
+            startLoop();
         } else {
             computeMax();
             if (scrollY > maxScroll) scrollY = Math.max(0, maxScroll);
@@ -119,6 +147,7 @@ public class SongListView extends View implements PlayerService.Listener {
         va.addUpdateListener(new ValueAnimator.AnimatorUpdateListener() {
             @Override public void onAnimationUpdate(ValueAnimator a) {
                 entrance = (float) a.getAnimatedValue();
+                startLoop();
                 invalidate();
             }
         });
@@ -148,6 +177,7 @@ public class SongListView extends View implements PlayerService.Listener {
             Song cur = s.current();
             currentId = cur != null ? cur.id : -1;
             playing = s.isPlaying();
+            if (playing) startLoop();
         }
         startLoop();
     }
@@ -158,7 +188,20 @@ public class SongListView extends View implements PlayerService.Listener {
         if (s != null) s.removeListener(this);
     }
 
-    private void startLoop() { postOnAnimation(loop); }
+    private boolean looping = false;
+
+    /**
+     * 启动帧循环。
+     *
+     * <p>**只在真正需要动画时运行**。之前的写法是无条件 postOnAnimation，
+     * 于是即使列表完全静止，UI 线程也在 120Hz 空转，跟滚动本身抢时间片 ——
+     * 这是「一卡一卡」的一个来源。
+     */
+    private void startLoop() {
+        if (looping) return;
+        looping = true;
+        postOnAnimation(loop);
+    }
 
     private final Runnable loop = new Runnable() {
         @Override public void run() {
@@ -174,27 +217,51 @@ public class SongListView extends View implements PlayerService.Listener {
                 if (beat > 1f) beat -= 1f;
                 need = true;
             }
-            // 惯性滑动
-            if (!dragging && Math.abs(velocity) > 1f) {
-                scrollY -= velocity * dt;
-                velocity *= Math.pow(0.02f, dt);   // 摩擦
-                if (Math.abs(velocity) < 20f) velocity = 0;
-                if (scrollY < 0) { scrollY = 0; velocity = 0; }
-                if (scrollY > maxScroll) { scrollY = maxScroll; velocity = 0; }
-                need = true;
+            // 惯性滑动 —— 交给系统 OverScroller
+            if (!dragging && flinging) {
+                if (flinger.computeScrollOffset()) {
+                    // 惯性期间 scrollY 直接就是位置（含冲过边界的部分），
+                    // 所以 overscroll 归零，避免两套偏移叠加。
+                    scrollY = flinger.getCurrY();
+                    overscroll = 0;
+                    overV = 0;
+                    need = true;
+                } else {
+                    flinging = false;
+                    scrollY = Math.max(0, Math.min(maxScroll, scrollY));
+                }
             }
-            // 回弹归位
-            if (!dragging && Math.abs(overscroll) > 0.5f) {
-                overscroll *= Math.pow(0.001f, dt);
-                if (Math.abs(overscroll) < 0.5f) overscroll = 0;
+
+            // 回弹：弹簧 + 阻尼（欠阻尼 → 会轻微过冲再稳下来，比单纯的指数衰减自然）
+            if (!dragging && maxScroll > 0
+                    && (Math.abs(overscroll) > 0.5f || Math.abs(overV) > 1f)) {
+                final float K = 240f;    // 刚度
+                final float C = 24f;     // 阻尼系数
+                overV += (-K * overscroll - C * overV) * dt;
+                overscroll += overV * dt;
+                if (Math.abs(overscroll) < 0.5f && Math.abs(overV) < 8f) {
+                    overscroll = 0; overV = 0;
+                }
+                // 限幅，防止极端情况下拉太远
+                float lim = Math.max(getHeight(), 1) * 0.55f;
+                if (overscroll > lim) { overscroll = lim; overV = 0; }
+                if (overscroll < -lim) { overscroll = -lim; overV = 0; }
                 need = true;
             }
             // 按压动画
             if (pressed >= 0 && pressAnim < 1f) { pressAnim = Math.min(1f, pressAnim + dt * 8f); need = true; }
             if (pressed < 0 && pressAnim > 0f) { pressAnim = Math.max(0f, pressAnim - dt * 8f); need = true; }
 
-            if (need) invalidate();
-            postOnAnimationDelayed(loop, 16);
+            if (need) {
+                invalidate();
+                // 对齐 vsync，别加 16ms 延迟 ——
+                // postOnAnimationDelayed(f, 16) 是「下一帧再等 16ms」，
+                // 实际间隔变成 ~32ms，滚动就只有 30fps。
+                postOnAnimation(loop);
+            } else {
+                // 没有要动的东西了 → 停掉循环，把 UI 线程让出来
+                looping = false;
+            }
         }
     };
 
@@ -226,10 +293,15 @@ public class SongListView extends View implements PlayerService.Listener {
             drawRow(c, t, i, top, rh);
         }
 
-        // 边缘渐隐
+        // 边缘渐隐（渐变对象缓存起来 —— 每帧 new 一个会持续制造垃圾）
         p.reset();
-        p.setShader(new LinearGradient(0, 0, 0, dp(24),
-                new int[]{t.surface, Hct.withAlpha(t.surface, 0f)}, null, Shader.TileMode.CLAMP));
+        if (fadeShader == null || fadeKey != t.surface) {
+            fadeKey = t.surface;
+            fadeShader = new LinearGradient(0, 0, 0, dp(24),
+                    new int[]{t.surface, Hct.withAlpha(t.surface, 0f)},
+                    null, Shader.TileMode.CLAMP);
+        }
+        p.setShader(fadeShader);
         c.drawRect(0, 0, getWidth(), dp(24), p);
         p.setShader(null);
     }
@@ -269,9 +341,17 @@ public class SongListView extends View implements PlayerService.Listener {
 
         rowRect.set(dp(10), top + dy + dp(2), getWidth() - dp(10), top + dy + rh - dp(2));
 
+        // ★ 性能关键：saveLayer 会给这一行**单独分配一块离屏缓冲**，
+        // 每个可见行每帧一次 —— 8 行就是每帧 8 块，必掉帧。
+        // 而入场上浮动画结束后 e 恒为 1，alpha=255 的图层完全是多余的。
+        // 所以只在 e 真的小于 1（入场动画进行中）时才开图层。
         int save = c.save();
-        c.saveLayerAlpha(rowRect.left - dp(4), rowRect.top - dp(4),
-                rowRect.right + dp(4), rowRect.bottom + dp(4), (int) (255 * e), Canvas.ALL_SAVE_FLAG);
+        final boolean needLayer = e < 0.995f;
+        if (needLayer) {
+            c.saveLayerAlpha(rowRect.left - dp(4), rowRect.top - dp(4),
+                    rowRect.right + dp(4), rowRect.bottom + dp(4),
+                    (int) (255 * e), Canvas.ALL_SAVE_FLAG);
+        }
 
         // 行背景
         float rr = dp(16);
@@ -320,7 +400,7 @@ public class SongListView extends View implements PlayerService.Listener {
             c.drawText(s.durationText(), rowRect.right - dp(12), rowRect.centerY() + dp(4), p);
         }
 
-        c.restore();
+        if (needLayer) c.restore();
         c.restoreToCount(save);
     }
 
@@ -363,12 +443,20 @@ public class SongListView extends View implements PlayerService.Listener {
             Draw.bitmapCrop(c, bm, coverRect, p);
             c.restoreToCount(save);
         } else {
-            // 占位：主题渐变 + 音符
+            // 占位：主题渐变 + 音符（渐变缓存，封面加载期间会连续画很多帧）
             p.reset(); p.setStyle(Paint.Style.FILL);
-            int c1 = Hct.blendLab(t.primaryContainer, t.surface, 0.2f);
-            int c2 = Hct.blendLab(t.tertiaryContainer, t.surface, 0.35f);
-            p.setShader(new LinearGradient(coverRect.left, coverRect.top, coverRect.right, coverRect.bottom,
-                    new int[]{c1, c2}, null, Shader.TileMode.CLAMP));
+            // blendLab 走 Lab 色彩空间往返（含 cbrt），不便宜。
+            // 之前把它的「结果」当缓存键，等于每帧照样算一遍 —— 缓存了个寂寞。
+            // 改成按 Tokens 实例判断：主题不变时 Tokens 是同一个对象。
+            if (phShader == null || phTheme != t) {
+                phTheme = t;
+                int c1 = Hct.blendLab(t.primaryContainer, t.surface, 0.2f);
+                int c2 = Hct.blendLab(t.tertiaryContainer, t.surface, 0.35f);
+                phShader = new LinearGradient(coverRect.left, coverRect.top,
+                        coverRect.right, coverRect.bottom,
+                        new int[]{c1, c2}, null, Shader.TileMode.CLAMP);
+            }
+            p.setShader(phShader);
             c.drawPath(tmp, p);
             p.setShader(null);
             RectF ib = new RectF(coverRect);
@@ -447,6 +535,7 @@ public class SongListView extends View implements PlayerService.Listener {
 
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
+                startLoop();          // 触摸就要开始动，把循环拉起来
                 downX = x; downY = y; lastY = y;
                 dragging = true; moved = false; velocity = 0;
                 pressed = rowAt(y);
@@ -465,10 +554,25 @@ public class SongListView extends View implements PlayerService.Listener {
                 }
                 if (moved) {
                     scrollY -= dy;
-                    // 边缘回弹
-                    if (scrollY < 0) { overscroll = scrollY; scrollY = 0; }
-                    else if (scrollY > maxScroll) { overscroll = scrollY - maxScroll; scrollY = maxScroll; }
-                    else overscroll = 0;
+
+                    // 内容没超出一屏 → 根本不该能拖，更不该回弹。
+                    // （标准 Android 的 OVER_SCROLL_IF_CONTENT_SCROLLS 就是这个行为）
+                    if (maxScroll <= 0) {
+                        scrollY = 0; overscroll = 0; overRaw = 0; overV = 0;
+                    } else if (scrollY < 0) {
+                        overRaw += dy;                       // 原始超出量累加
+                        if (overRaw < 0) overRaw = 0;
+                        scrollY = 0; overV = 0;
+                        overscroll = -rubber(overRaw);       // 显示时才阻尼
+                    } else if (scrollY > maxScroll) {
+                        overRaw += dy;
+                        if (overRaw > 0) overRaw = 0;
+                        scrollY = maxScroll; overV = 0;
+                        overscroll = rubber(-overRaw);
+                    } else {
+                        scrollY = Math.max(0, Math.min(maxScroll, scrollY));
+                        overscroll = 0; overRaw = 0; overV = 0;
+                    }
                 }
                 lastY = y;
                 invalidate();
@@ -485,13 +589,42 @@ public class SongListView extends View implements PlayerService.Listener {
                     invalidate();
                     return true;
                 }
+                overRaw = 0;   // 拖拽结束，原始量交给弹簧
+                startLoop();   // 接下来是惯性/回弹，循环必须醒着
                 if (vt != null) {
                     vt.computeCurrentVelocity(1000);
-                    velocity = -vt.getYVelocity();
-                    // 边界方向不做惯性
-                    if ((scrollY <= 0 && velocity < 0) || (scrollY >= maxScroll && velocity > 0)) velocity = 0;
+                    // 约定：上滑 getYVelocity() < 0；scrollY 增大 = 内容向上。
+                    // 两者同号，所以**不能取反**。
+                    velocity = vt.getYVelocity();
                     vt.recycle(); vt = null;
                 }
+
+                if (maxScroll > 0) {
+                    if (overscroll != 0f || overV != 0f) {
+                        // 拖拽时被拉出了边界：把「逻辑位置」（含超出量）交给
+                        // springBack 弹回去。overscroll 为负=顶部拉出，
+                        // 为正=底部拉出，所以相加就得到界外的真实位置。
+                        overV = 0;
+                        scrollY = scrollY + overscroll;
+                        overscroll = 0;
+                        flinger.springBack(0, (int) scrollY, 0, 0, 0, (int) maxScroll);
+                        flinging = true;
+                    } else if (Math.abs(velocity) > 30f) {
+                        // 正常甩动：交给系统物理。
+                        //
+                        // ★ 注意 velocity 要取反：
+                        //   OverScroller 的 velocityY 正值 = 朝 Y 增大的方向；
+                        //   而本 View 的 scrollY 增大 = 内容向上 = 手指上滑
+                        //   = getYVelocity() 为负。两者约定相反，所以传 -velocity。
+                        //
+                        // 最后一个参数 overY 是允许冲出边界的距离，
+                        // OverScroller 会自己冲出去再弹回来。
+                        flinger.fling(0, (int) scrollY, 0, (int) -velocity,
+                                0, 0, 0, (int) maxScroll, 0, Ui.px(getContext(), 90));
+                        flinging = true;
+                    }
+                }
+                velocity = 0;
                 if (!moved) {
                     int i = rowAt(y);
                     if (i >= 0 && i == pressed && cb != null) {
@@ -505,6 +638,20 @@ public class SongListView extends View implements PlayerService.Listener {
             }
         }
         return super.onTouchEvent(e);
+    }
+
+    /**
+     * 橡皮筋阻尼：拉得越远，同样的手指位移换来的偏移越小。
+     *
+     * <p>用 {@code x / (1 + x/L)} 这种渐进式而不是简单地乘个系数 ——
+     * 线性阻尼拉到很远还是会一直跟手，手感发飘。
+     */
+    private float rubber(float x) {
+        if (x <= 0) return 0;
+        // L 越大越松。之前 0.75 偏紧，拉半天不动；0.42 大约「拉 300px 出 200px」，
+        // 既明确「到头了」，又不至于像卡住。
+        float L = Math.max(getHeight(), 1) * 0.42f;
+        return L * (x / (L + x));
     }
 
     /** 滚到正在播放项 */
@@ -528,6 +675,7 @@ public class SongListView extends View implements PlayerService.Listener {
     // ── PlayerService.Listener ──────────────────────────────────────────────
     @Override public void onSongChanged(Song s, int index) {
         currentId = s != null ? s.id : -1;
+        startLoop();
         invalidate();
     }
     @Override public void onPlayStateChanged(boolean pl) { playing = pl; invalidate(); }

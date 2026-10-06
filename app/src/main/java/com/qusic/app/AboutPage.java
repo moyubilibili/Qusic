@@ -113,7 +113,12 @@ public class AboutPage {
                 new Runnable() { @Override public void run() { showSeedPicker(); } }));
         opts.addView(divider(c, t));
         opts.addView(settingRow(c, t, "深色模式", Theme.isDark() ? "已开启" : "已关闭",
-                "moon", new Runnable() { @Override public void run() { Theme.toggleDark(); } }));
+                "moon", new Runnable() {
+                    @Override public void run() {
+                        ThemeReveal.arm(act, act.getCurrentFocus());
+                        Theme.toggleDark();
+                    }
+                }));
         opts.addView(divider(c, t));
         opts.addView(settingRow(c, t, "动画速度",
                 Theme.animMode() == Theme.ANIM_FAST ? "轻快"
@@ -132,6 +137,7 @@ public class AboutPage {
                 Theme.cloudEnabled() ? "已开启（点按可开关）" : "已关闭（点按可开关）",
                 "note", new Runnable() {
                     @Override public void run() {
+                        ThemeReveal.armCenter(act);
                         Theme.setCloud(!Theme.cloudEnabled());
                         act.recreate();
                     }
@@ -139,6 +145,7 @@ public class AboutPage {
         opts.addView(divider(c, t));
         opts.addView(settingRow(c, t, "随机换个配色", "点一下试试", "palette", new Runnable() {
             @Override public void run() {
+                ThemeReveal.armCenter(act, ThemeReveal.MODE_INK);
                 Theme.setSeed(Tokens.SEEDS[new java.util.Random().nextInt(Tokens.SEEDS.length)]);
             }
         }));
@@ -401,6 +408,7 @@ public class AboutPage {
                     @Override public void onClick(View view) {
                         Ui.hapticLight(view);
                         d.dismiss();
+                        ThemeReveal.armCenter(act, ThemeReveal.MODE_INK);
                         Theme.setSeed(Tokens.SEEDS[idx]);
                     }
                 });
@@ -422,6 +430,7 @@ public class AboutPage {
             dot.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     Ui.hapticLight(v);
+                    ThemeReveal.armCenter(act, ThemeReveal.MODE_INK);
                     Theme.setSeed(color);
                 }
             });

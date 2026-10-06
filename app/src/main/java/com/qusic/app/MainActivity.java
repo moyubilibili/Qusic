@@ -226,6 +226,10 @@ public class MainActivity extends Activity implements PlayerService.Listener {
 
         setContentView(root);
 
+        // 如果这次重建是「切换配色/深浅色」引起的，就播圆形扩散转场 ——
+        // 之前是直接 recreate()，整个界面闪一下，很生硬。
+        ThemeReveal.play(this, root);
+
         // 等窗口确定后再按真实 inset 校正一次位置（首帧 WindowInsets 可能还没到）
         root.post(new Runnable() {
             @Override public void run() { applyInsets(); }

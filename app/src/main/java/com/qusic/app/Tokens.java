@@ -95,8 +95,11 @@ public final class Tokens {
         // 三个强调色族：主色 / 次色（低色度）/ 三色（色相偏移 60°）
         double cSec = c * 0.34, cTer = c * 0.62;
         // 中性色：色度极低但非零
-        double nc = Math.min(c * 0.055, 4.0);
-        double nv = Math.min(c * 0.10, 8.0);
+        // surface 的中性色度。MD3 原始规格锁在 4 以内，背景几乎纯白 ——
+        // 好处是耐看，坏处是**换配色时看不出换了**（大面积区域纹丝不动），
+        // 圆形扩散转场也就失去了意义。这里放到 9，能明显感到色调但依然干净。
+        double nc = Math.min(c * 0.075, 9.0);
+        double nv = Math.min(c * 0.14, 14.0);
         // 错误色固定为红系，不随种子漂移
         final double EH = 25, EC = 60;
 

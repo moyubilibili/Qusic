@@ -22,6 +22,13 @@ public class Song {
      */
     public boolean localOnly;
 
+    // ── 展示用字符串的缓存 ──
+    // 元数据在导入后就不再变化，可以安全缓存。
+    // 加这两个字段是因为 subtitle()/durationText() 出现在自绘列表的 onDraw 里，
+    // 每帧每行都调用 —— 不缓存的话光是字符串分配就能把帧率拖垮。
+    private String cachedSubtitle;
+    private String cachedDuration;
+
     /** 在线来源 */
     public static final int SOURCE_LOCAL = 0, SOURCE_NETEASE = 1, SOURCE_KUWO = 2,
             SOURCE_KUGOU = 3;
@@ -60,20 +67,31 @@ public class Song {
     public Song() {}
 
     public String durationText() {
-        long s = durationMs / 1000;
-        return String.format(java.util.Locale.US, "%d:%02d", s / 60, s % 60);
+        // 缓存：这两个方法在 onDraw 里每行每帧都被调用，
+        // 每次都新建字符串的话每秒会产生上千次分配，直接拖出掉帧。
+        if (cachedDuration == null) {
+            long s = durationMs / 1000;
+            cachedDuration = String.format(java.util.Locale.US, "%d:%02d", s / 60, s % 60);
+        }
+        return cachedDuration;
     }
 
     /** 展示用副标题：歌手 · 专辑 */
     public String subtitle() {
-        StringBuilder sb = new StringBuilder();
-        if (artist != null && artist.length() > 0 && !"<unknown>".equals(artist)) sb.append(artist);
-        else sb.append("未知歌手");
-        if (album != null && album.length() > 0 && !"<unknown>".equals(album)) {
-            sb.append(" · ").append(album);
+        if (cachedSubtitle == null) {
+            StringBuilder sb = new StringBuilder();
+            if (artist != null && artist.length() > 0 && !"<unknown>".equals(artist)) sb.append(artist);
+            else sb.append("未知歌手");
+            if (album != null && album.length() > 0 && !"<unknown>".equals(album)) {
+                sb.append(" · ").append(album);
+            }
+            cachedSubtitle = sb.toString();
         }
-        return sb.toString();
+        return cachedSubtitle;
     }
+
+    /** 元数据变了就清掉缓存（目前只在导入时设置一次，属于防御性代码） */
+    public void clearTextCache() { cachedSubtitle = null; cachedDuration = null; }
 
     public boolean matches(String q) {
         if (q == null || q.length() == 0) return true;

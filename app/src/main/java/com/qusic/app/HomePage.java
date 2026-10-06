@@ -33,6 +33,8 @@ public class HomePage {
 
     private final MainActivity act;
     private View root;
+    /** 最近一次被点的快捷入口，圆形扩散动画从它开始 */
+    private View lastTapped;
     private HeroCard hero;
     private LinearLayout recentBox;
     private TextView greeting;
@@ -112,13 +114,20 @@ public class HomePage {
         quick.addView(space(c, 8));
         quick.addView(chip(c, "配色", "palette", t, new Runnable() {
             @Override public void run() {
+                // 记住「从哪个按钮开始扩散」，然后在切换前把旧界面截下来
+                ThemeReveal.arm(act, lastTapped, ThemeReveal.MODE_INK);
                 Theme.setSeed(Tokens.SEEDS[new java.util.Random().nextInt(Tokens.SEEDS.length)]);
             }
         }), weighted());
         quick.addView(space(c, 8));
         quick.addView(chip(c, Theme.isDark() ? "浅色" : "深色",
                 Theme.isDark() ? "sun" : "moon", t,
-                new Runnable() { @Override public void run() { Theme.toggleDark(); } }), weighted());
+                new Runnable() {
+                    @Override public void run() {
+                        ThemeReveal.arm(act, lastTapped);
+                        Theme.toggleDark();
+                    }
+                }), weighted());
         col.addView(quick);
 
         col.addView(sectionTitle(c, "最近导入", t));
@@ -178,6 +187,7 @@ public class HomePage {
         box.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Ui.hapticLight(v);
+                lastTapped = box;
                 if (action != null) action.run();
             }
         });
