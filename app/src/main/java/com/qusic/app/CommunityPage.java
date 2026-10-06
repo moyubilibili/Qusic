@@ -607,25 +607,142 @@ public class CommunityPage {
         box.addView(titleF);
         box.addView(noteF);
 
+        // ── 本地曲目提醒 ──
+        // 本地歌只有歌名能被分享出去，音频文件不会（也不该）上传。
+        // 别人导入后会看到歌名却放不了，所以这里主动提出帮忙找在线版。
+        int localN = Playlist.countLocal(it);
+        final boolean[] doMatch = { localN > 0 };
+
+        if (localN > 0) {
+            android.widget.CheckBox cb = new android.widget.CheckBox(act);
+            cb.setText("帮我在网上找同样的歌（推荐）");
+            cb.setTextSize(13);
+            cb.setChecked(true);
+            cb.setTextColor(Theme.t().onSurface);
+            cb.setPadding(0, Ui.px(act, 10), 0, 0);
+            cb.setOnCheckedChangeListener(
+                    new android.widget.CompoundButton.OnCheckedChangeListener() {
+                @Override public void onCheckedChanged(
+                        android.widget.CompoundButton b, boolean checked) {
+                    doMatch[0] = checked;
+                }
+            });
+            box.addView(cb);
+        }
+
         new MdDialog.Builder(act)
                 .title("分享到社区")
-                .message("会分享歌单的曲目信息，不含任何音频文件。")
+                .message(localN > 0
+                        ? ("这张歌单里有 " + localN + " 首是你自己导入的本地歌曲。\n"
+                           + "别人没有这些文件，直接分享的话他们只能看到歌名、听不了。\n\n"
+                           + "我可以拿「歌名 + 歌手 + 时长」去酷我/网易云找同一首，"
+                           + "找到的话别人就能直接播放。")
+                        : "会分享歌单的曲目信息，不含任何音频文件。")
                 .content(box)
                 .negative("取消", null)
-                .positive("发布", new MdDialog.OnClick() {
+                .positive(localN > 0 ? "分享" : "发布", new MdDialog.OnClick() {
                     @Override public void onClick() {
                         String t = titleF.text().trim();
                         if (t.length() == 0) { toast("标题不能为空"); return; }
-                        String json = Playlist.exportJson(it);
-                        Community.publish(act, t, noteF.text().trim(), json,
-                                new Community.Callback() {
-                            @Override public void onResult(Object d, String e) {
-                                toast(e == null ? "已发布到社区" : e);
-                                if (e == null) { openId = 0; load(); }
-                            }
-                        });
+                        if (localN > 0 && doMatch[0]) {
+                            matchThenPublish(it, t, noteF.text().trim());
+                        } else {
+                            publishNow(it, t, noteF.text().trim(), null);
+                        }
                     }
                 }).show();
+    }
+
+    /** 逐个把本地曲目匹配到在线音源，然后发布 */
+    private void matchThenPublish(final Playlist.Item it, final String title,
+                                  final String note) {
+        final List<Song> locals = new ArrayList<>();
+        for (Song s : it.songs) if (!s.online) locals.add(s);
+
+        final java.util.Map<Long, Song> matches = new java.util.HashMap<>();
+
+        // 进度提示用自定义 content 视图 —— MdDialog 不暴露内部 TextView，
+        // 想中途改文字就得自己塞一个进来。
+        final TextView progText = new TextView(act);
+        progText.setTextSize(13.5f);
+        progText.setTextColor(Hct.withAlpha(Theme.t().onSurfaceVariant, 0.95f));
+        progText.setLineSpacing(Ui.px(act, 4), 1f);
+        progText.setText("正在匹配…");
+
+        final android.app.Dialog prog = new MdDialog.Builder(act)
+                .title("正在匹配在线音源")
+                .message("共 " + locals.size() + " 首本地歌曲，"
+                        + "拿「歌名 + 歌手 + 时长」去酷我 / 网易云找同一首。")
+                .content(progText)
+                .cancelable(false)
+                .positive("取消", null)
+                .show();
+
+        matchOne(it, locals, 0, matches, new Runnable() {
+            @Override public void run() {
+                if (prog != null && prog.isShowing()) prog.dismiss();
+                int ok = matches.size();
+                int fail = locals.size() - ok;
+                String msg = "匹配完成：" + ok + " / " + locals.size() + " 首找到了在线版本。";
+                if (fail > 0) {
+                    msg += "\n剩下 " + fail + " 首没找到，"
+                         + "会在歌单里标注「待你自己导入」，不影响其他曲目播放。";
+                }
+                new MdDialog.Builder(act)
+                        .title("匹配结果")
+                        .message(msg)
+                        .negative("取消分享", null)
+                        .positive("继续发布", new MdDialog.OnClick() {
+                            @Override public void onClick() {
+                                publishNow(it, title, note, matches);
+                            }
+                        }).show();
+            }
+        }, new Runnable() {
+            @Override public void run() {
+                progText.setText("已处理 " + (matches.size() + 1) + " / " + locals.size()
+                        + " 首，找到 " + matches.size() + " 首");
+            }
+        });
+    }
+
+    private void matchOne(final Playlist.Item it, final List<Song> locals, final int idx,
+                          final java.util.Map<Long, Song> matches,
+                          final Runnable done, final Runnable tick) {
+        if (idx >= locals.size()) { done.run(); return; }
+        tick.run();
+        SongMatch.match(act, locals.get(idx), new SongMatch.Callback() {
+            @Override public void onResult(Song matched, int score) {
+                if (matched != null) matches.put(locals.get(idx).id, matched);
+                matchOne(it, locals, idx + 1, matches, done, tick);
+            }
+        });
+    }
+
+    /** 真正发布 */
+    private void publishNow(Playlist.Item it, String title, String note,
+                            java.util.Map<Long, Song> matches) {
+        final List<Song> unmatched = new ArrayList<>();
+        String json = Playlist.exportJson(it, matches, unmatched);
+        if (json == null) { toast("导出失败"); return; }
+        Community.publish(act, title, note, json, new Community.Callback() {
+            @Override public void onResult(Object d, String error) {
+                if (error != null) { toast(error); return; }
+                // 重新加载列表
+                openId = 0;
+                load();
+                if (unmatched.isEmpty()) {
+                    toast("已发布到社区");
+                } else {
+                    new MdDialog.Builder(act)
+                            .title("已发布")
+                            .message("有 " + unmatched.size() + " 首没能匹配到在线版本，"
+                                    + "已标注为「待自己导入」。\n"
+                                    + "其他曲目别人可以直接播放。")
+                            .positive("好", null).show();
+                }
+            }
+        });
     }
 
     // ── 登录 / 注册 ─────────────────────────────────────────────────────────

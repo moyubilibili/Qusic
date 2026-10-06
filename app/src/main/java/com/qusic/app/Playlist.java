@@ -179,7 +179,7 @@ public final class Playlist {
     /** 文件后缀。用大写 Q 开头，辨识度高，也方便在社群里认出来 */
     public static final String EXT = ".Qusic";
     public static final String MIME = "application/json";
-    private static final int FORMAT_VERSION = 1;
+    private static final int FORMAT_VERSION = 2;
 
     /**
      * 导出成 .Qusic 文本。
@@ -191,6 +191,23 @@ public final class Playlist {
      * 导出去给别人也是一放就失效。
      */
     public static String exportJson(Item it) {
+        return exportJson(it, null, null);
+    }
+
+    /**
+     * 导出为 .Qusic。
+     *
+     * @param matches    本地曲目 → 匹配到的在线曲目。给了就用在线版导出，
+     *                   接收方可以直接播放。null 表示不做匹配。
+     * @param unmatched  输出参数：没匹配上的本地曲目会被塞进这个 list
+     *
+     * <p><b>关键点：本地曲目不写 uri。</b>
+     * 本地歌的 uri 是 {@code content://...}，只在**本机**有效，
+     * 发给别人就是一串无意义的字符串。所以本地曲目一律不写 uri，
+     * 改为写 {@code localOnly: true}，让接收方知道「这首得自己导入」。
+     */
+    public static String exportJson(Item it, java.util.Map<Long, Song> matches,
+                                    List<Song> unmatched) {
         try {
             JSONObject root = new JSONObject();
             root.put("format", "Qusic");
@@ -201,17 +218,33 @@ public final class Playlist {
             root.put("count", it.songs.size());
             JSONArray arr = new JSONArray();
             for (Song s : it.songs) {
+                // 本地曲目：优先用匹配到的在线版
+                Song use = s;
+                boolean localOnly = false;
+                if (!s.online) {
+                    Song m = (matches == null) ? null : matches.get(s.id);
+                    if (m != null && m.online) {
+                        use = m;
+                    } else {
+                        localOnly = true;
+                        if (unmatched != null) unmatched.add(s);
+                    }
+                }
                 JSONObject o = new JSONObject();
-                o.put("title", s.title == null ? "" : s.title);
-                o.put("artist", s.artist == null ? "" : s.artist);
-                o.put("album", s.album == null ? "" : s.album);
-                o.put("duration", s.durationMs);
-                o.put("source", s.source);
-                o.put("online", s.online);
-                o.put("platformId", s.neteaseId);
-                o.put("hash", s.mime == null ? "" : s.mime);   // 酷狗用
-                o.put("uri", s.uri == null ? "" : s.uri);
-                o.put("coverUrl", s.coverUrl == null ? "" : s.coverUrl);
+                o.put("title", use.title == null ? "" : use.title);
+                o.put("artist", use.artist == null ? "" : use.artist);
+                o.put("album", use.album == null ? "" : use.album);
+                o.put("duration", use.durationMs);
+                o.put("source", use.source);
+                o.put("online", use.online);
+                o.put("platformId", use.neteaseId);
+                o.put("hash", use.mime == null ? "" : use.mime);
+                // ★ 本地曲目不写 uri（对别人无效）
+                o.put("uri", use.online && use.uri != null ? use.uri : "");
+                o.put("coverUrl", use.coverUrl == null ? "" : use.coverUrl);
+                if (localOnly) {
+                    o.put("localOnly", true);   // 接收方据此提示「需要自己导入」
+                }
                 arr.put(o);
             }
             root.put("songs", arr);
@@ -221,10 +254,22 @@ public final class Playlist {
         }
     }
 
+    /** 这张歌单里有几首是纯本地曲目（别人听不了） */
+    public static int countLocal(Item it) {
+        if (it == null) return 0;
+        int n = 0;
+        for (Song s : it.songs) if (!s.online) n++;
+        return n;
+    }
+
     /** 导入结果 */
     public static class ImportResult {
         public Item item;
         public String error;
+        /** 其中有多少首是「需要自己导入」的本地曲目 */
+        public int localOnlyCount;
+        /** 其中有多少首可以直接在线播放 */
+        public int playableCount;
         public int total;      // 文件里的歌曲数
         public int matched;    // 能在本机曲库里找到的本地歌曲数
     }
@@ -277,6 +322,11 @@ public final class Playlist {
                 s.neteaseId = o.optLong("platformId");
                 s.mime = o.optString("hash", "");
                 s.uri = o.optString("uri", "");
+                // 对方分享时没匹配到在线音源的本地曲目
+                if (o.optBoolean("localOnly", false)) {
+                    s.localOnly = true;
+                    r.localOnlyCount++;
+                }
                 s.path = s.uri;
                 s.coverUrl = o.optString("coverUrl", "");
                 s.id = o.optLong("id", 0);
@@ -289,6 +339,10 @@ public final class Playlist {
                     if (hit != null) { s = hit; r.matched++; }
                 }
                 it.songs.add(s);
+            }
+            // 统计：能直接播的 vs 需要自己导入的
+            for (Song s : it.songs) {
+                if (s.online || !s.localOnly) r.playableCount++;
             }
             r.item = it;
             return r;

@@ -210,9 +210,14 @@ public class PlaylistDetailPage {
             col.addView(tt);
             String sub = sg.subtitle() + " · " + sg.durationText();
             if (sg.online) sub = Online.sourceName(sg.source) + " · " + sub;
+            // 别人分享过来、但没能匹配到在线音源的曲目
+            boolean needsSelf = !sg.online && sg.localOnly;
+            if (needsSelf) sub = "待你导入 · " + sub;
             TextView s2 = new TextView(c);
             s2.setText(sub);
-            s2.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.85f));
+            s2.setTextColor(needsSelf
+                    ? Hct.withAlpha(t.error, 0.85f)
+                    : Hct.withAlpha(t.onSurfaceVariant, 0.85f));
             s2.setTextSize(11.5f);
             s2.setMaxLines(1);
             s2.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -236,6 +241,16 @@ public class PlaylistDetailPage {
             row.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     Ui.hapticLight(v);
+                    if (!sg.online && sg.localOnly && (sg.uri == null || sg.uri.length() == 0)) {
+                        new MdDialog.Builder(act)
+                                .title("这首需要你自己导入")
+                                .message("「" + sg.title + "」是分享者自己导入的本地歌曲，"
+                                        + "没能匹配到在线音源。\n\n"
+                                        + "音频文件不会被上传，所以这首歌需要你自己"
+                                        + "导入对应的文件才能播放。")
+                                .positive("知道了", null).show();
+                        return;
+                    }
                     playFrom(songs, idx);
                 }
             });

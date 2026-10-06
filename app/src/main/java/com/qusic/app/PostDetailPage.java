@@ -377,13 +377,24 @@ public class PostDetailPage {
         }
         r.item.name = name;
         Playlist.Item created = Playlist.create(act, name);
-        int ok = 0;
-        for (Song sg : r.item.songs) if (Playlist.add(act, created.id, sg)) ok++;
+        int ok = 0, needSelf = 0;
+        for (Song sg : r.item.songs) {
+            if (Playlist.add(act, created.id, sg)) ok++;
+            if (sg.localOnly && !sg.online) needSelf++;
+        }
         act.refreshAllPages();
+
+        StringBuilder msg = new StringBuilder();
+        msg.append("「").append(name).append("」已加入你的歌单，共 ").append(ok).append(" 首。\n");
+        msg.append("到「曲库 → 歌单」里就能看到。");
+        if (needSelf > 0) {
+            msg.append("\n\n注意：其中有 ").append(needSelf).append(" 首是对方自己导入的本地歌曲，")
+               .append("没能匹配到在线音源，所以暂时放不了 —— ")
+               .append("需要你自己导入对应的音频文件才能听。");
+        }
         new MdDialog.Builder(act)
                 .title("导入成功")
-                .message("「" + name + "」已加入你的歌单，共 " + ok + " 首。\n"
-                        + "到「曲库 → 歌单」里就能看到。")
+                .message(msg.toString())
                 .positive("好", null)
                 .show();
     }

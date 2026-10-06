@@ -16,6 +16,11 @@ public class Song {
     public String coverUrl = "";
     /** 来源标记：true = 在线曲目 */
     public boolean online;
+    /**
+     * 来自别人的歌单、且对方没能匹配到在线音源。
+     * 意思是：这首得你自己导入才能听。
+     */
+    public boolean localOnly;
 
     /** 在线来源 */
     public static final int SOURCE_LOCAL = 0, SOURCE_NETEASE = 1, SOURCE_KUWO = 2,
