@@ -62,6 +62,10 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     private LibraryPage libraryPage;
     private SearchPage searchPage;
     private CommunityPage communityPage;
+    /** 歌单详情：覆盖整屏的独立页（连底栏也盖住） */
+    private PlaylistDetailPage playlistDetail;
+    /** 社区帖子详情：独立的二级页面 */
+    private PostDetailPage postDetail;
     private AboutPage aboutPage;
     private View currentPage;
     private int currentTab = 0;
@@ -155,6 +159,18 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         });
         libraryPage = new LibraryPage(this);
         searchPage = new SearchPage(this);
+        // 歌单详情：独立整屏页。加在 root 最后 → 覆盖页面、迷你条和底栏，
+        // 这样它才是「另一层」，而不是嵌在曲库页里跟主界面糊在一起。
+        playlistDetail = new PlaylistDetailPage(this);
+        playlistDetail.setOnClose(new PlaylistDetailPage.OnClose() {
+            @Override public void onClose() { closePlaylistDetail(); }
+        });
+
+        postDetail = new PostDetailPage(this);
+        postDetail.setOnClose(new PostDetailPage.OnClose() {
+            @Override public void onClose() { closePostDetail(); }
+        });
+
         communityPage = new CommunityPage(this);
         aboutPage = new AboutPage(this);
 
@@ -517,6 +533,103 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         return new String(bos.toByteArray(), "UTF-8");
     }
 
+    // ── 歌单详情（独立整屏页）────────────────────────────────────────────
+    private boolean detailOpen;
+
+    /** 打开某个歌单的详情页 */
+    public void openPlaylistDetail(long id) {
+        Playlist.Item it = Playlist.byId(id);
+        if (it == null) return;
+
+        playlistDetail.bind(id);
+
+        if (!detailOpen) {
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            root.addView(playlistDetail.view(), lp);
+            detailOpen = true;
+        }
+        // 明确置顶：光靠「最后添加」在某些情况下不够稳
+        // （比如迷你播放条升起来的时候），显式提到最前并抬 Z。
+        root.bringChildToFront(playlistDetail.view());
+        playlistDetail.view().setTranslationZ(Ui.px(this, 12));
+
+        // 从右侧滑入 + 淡入，明确是「进入下一层」
+        View v = playlistDetail.view();
+        v.animate().cancel();
+        v.setTranslationX(getResources().getDisplayMetrics().widthPixels * 0.22f);
+        v.setAlpha(0f);
+        v.animate().translationX(0f).alpha(1f)
+                .setDuration(Theme.dur(260))
+                .setInterpolator(Theme.EMPHASIZED)
+                .start();
+        Ui.hapticLight(v);
+    }
+
+    /** 关闭歌单详情 */
+    public void closePlaylistDetail() {
+        if (!detailOpen) return;
+        detailOpen = false;
+        final View v = playlistDetail.view();
+        v.animate().cancel();
+        v.animate().translationX(getResources().getDisplayMetrics().widthPixels * 0.22f)
+                .alpha(0f)
+                .setDuration(Theme.dur(200))
+                .withEndAction(new Runnable() {
+                    @Override public void run() {
+                        root.removeView(v);
+                        v.setAlpha(1f);
+                        v.setTranslationX(0f);
+                    }
+                }).start();
+        refreshAllPages();
+    }
+
+    public boolean isDetailOpen() { return detailOpen; }
+
+    // ── 社区帖子详情（独立二级页面）────────────────────────────────────────
+    private boolean postOpen;
+
+    /** 打开社区帖子详情 */
+    public void openPostDetail(long id) {
+        postDetail.bind(id);
+        if (!postOpen) {
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            root.addView(postDetail.view(), lp);
+            postOpen = true;
+        }
+        root.bringChildToFront(postDetail.view());
+        postDetail.view().setTranslationZ(Ui.px(this, 12));
+        View v = postDetail.view();
+        v.animate().cancel();
+        v.setTranslationX(getResources().getDisplayMetrics().widthPixels * 0.22f);
+        v.setAlpha(0f);
+        v.animate().translationX(0f).alpha(1f)
+                .setDuration(Theme.dur(260))
+                .setInterpolator(Theme.EMPHASIZED).start();
+        Ui.hapticLight(v);
+    }
+
+    public void closePostDetail() {
+        if (!postOpen) return;
+        postOpen = false;
+        final View v = postDetail.view();
+        v.animate().cancel();
+        v.animate().translationX(getResources().getDisplayMetrics().widthPixels * 0.22f)
+                .alpha(0f).setDuration(Theme.dur(200))
+                .withEndAction(new Runnable() {
+                    @Override public void run() {
+                        root.removeView(v);
+                        v.setAlpha(1f);
+                        v.setTranslationX(0f);
+                    }
+                }).start();
+        if (communityPage != null) communityPage.load();
+    }
+
+    public boolean isPostOpen() { return postOpen; }
+
     /** 开关社区。关掉后底栏回到 4 项，给只想当播放器用的人。 */
     public void toggleCommunity() {
         boolean next = !Theme.community();
@@ -680,13 +793,10 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     }
 
     @Override public void onBackPressed() {
-        // 社区页在帖子详情时，返回键先回到列表 ——
-        // 之前会直接退出应用，非常反直觉。
-        if (currentTab == 3 && Theme.community() && communityPage != null
-                && communityPage.inDetail()) {
-            communityPage.goBackToList();
-            return;
-        }
+        // 歌单详情页优先关闭
+        if (detailOpen) { closePlaylistDetail(); return; }
+        // 社区帖子详情（二级页面）优先关闭
+        if (postOpen) { closePostDetail(); return; }
         // 不在首页时，返回键回首页，而不是退出
         if (currentTab != 0) {
             switchTab(0, true);

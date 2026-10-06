@@ -465,8 +465,7 @@ public class LibraryPage {
         Context c = act;
         Tokens t = Theme.t();
         plBox.removeAllViews();
-        if (openListId == 0) buildPlaylistIndex(c, t);
-        else buildPlaylistDetail(c, t);
+        buildPlaylistIndex(c, t);   // 详情已改为独立页面，这里只建列表
     }
 
     private void buildPlaylistIndex(Context c, Tokens t) {
@@ -556,11 +555,12 @@ public class LibraryPage {
             });
             row.addView(more, new LinearLayout.LayoutParams(Ui.px(c, 18), Ui.px(c, 18)));
 
+            Ui.pressable(row);
             row.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
-                    Ui.hapticLight(v);
-                    openListId = it.id;
-                    buildPlaylists();
+                    // 打开独立的整屏详情页，而不是把内容塞在当前页里 ——
+                    // 之前那样会让「曲库」的标题和分段栏一直挂着，层级很乱。
+                    act.openPlaylistDetail(it.id);
                 }
             });
             plBox.addView(row);

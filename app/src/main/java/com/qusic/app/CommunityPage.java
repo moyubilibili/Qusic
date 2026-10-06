@@ -271,8 +271,8 @@ public class CommunityPage {
             card.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     Ui.hapticLight(v);
-                    openId = p.id;
-                    openPost(p.id);
+                    // 打开独立的二级页面 —— 详情不再挤在列表页里
+                    act.openPostDetail(p.id);
                 }
             });
 
@@ -514,8 +514,8 @@ public class CommunityPage {
         load();
     }
 
-    /** 当前是否停留在某个帖子的详情里 */
-    public boolean inDetail() { return openId != 0; }
+    /** 详情已改为独立二级页面，这里恒为 false（保留兼容） */
+    public boolean inDetail() { return false; }
 
     // ── 动作 ────────────────────────────────────────────────────────────────
     private void doImport(final Community.Post p) {

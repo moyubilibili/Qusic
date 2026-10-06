@@ -33,6 +33,10 @@ echo "== 1/7 aapt2 compile =="
 "$TOOL/aapt2" compile --dir "$SRC/res" -o "$OUT/res-c/res.zip" || exit 1
 
 echo "== 2/7 aapt2 link =="
+# ⚠️ 千万不要加 --shrink-resources！
+# 本项目的图标是 Icons.get() 用 getIdentifier("ic_" + name) **按名字反射**取的，
+# aapt2 看不到这种引用，一旦开启资源裁剪会把所有图标当成「未使用」删掉，
+# 结果是整个 App 的图标集体变空白，而且编译期毫无报错。
 "$TOOL/aapt2" link \
   -o "$OUT/base.apk" \
   -I "$TOOL/android.jar" \
