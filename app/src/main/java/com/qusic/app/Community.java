@@ -274,6 +274,24 @@ public final class Community {
         });
     }
 
+    /**
+     * App 内重置密码：邮箱 + 6 位验证码 + 新密码。
+     *
+     * <p>服务端还会校验验证码格式、有效期（10 分钟）、
+     * 以及按邮箱和 IP 的双重限流。
+     */
+    public static void resetCode(final Context ctx, final String email, final String code,
+                                 final String newPass, final Callback cb) {
+        post(ctx, "reset_code", "{\"email\":" + Json.q(email)
+                + ",\"code\":" + Json.q(code)
+                + ",\"new_password\":" + Json.q(newPass) + "}", cb, false);
+    }
+
+    /** 请求发送重置验证码到邮箱 */
+    public static void forgot(final Context ctx, final String email, final Callback cb) {
+        post(ctx, "forgot", "{\"email\":" + Json.q(email) + "}", cb, false);
+    }
+
     /** 发布歌单 */
     public static void publish(final Context ctx, final String title, final String note,
                                final String payload, final Callback cb) {

@@ -887,6 +887,19 @@ public class CommunityPage {
         box.addView(mailF);
         box.addView(passF);
 
+        // MdDialog 只有左右两个按钮，所以「忘记密码」做成内容里的文字链
+        TextView forgotLink = new TextView(act);
+        forgotLink.setText("忘记密码？");
+        forgotLink.setTextSize(12.5f);
+        forgotLink.setTypeface(Ui.tfMed());
+        forgotLink.setTextColor(Theme.t().primary);
+        forgotLink.setPadding(Ui.px(act, 4), Ui.px(act, 10), 0, 0);
+        forgotLink.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { Ui.hapticLight(v); showForgot(); }
+        });
+        Ui.pressable(forgotLink);
+        box.addView(forgotLink);
+
         new MdDialog.Builder(act)
                 .title("登录 / 注册")
                 .message("填邮箱就是注册新账号，不填就是登录已有账号。\n"
@@ -901,7 +914,89 @@ public class CommunityPage {
                         if (n.length() == 0 || p.length() == 0) { toast("用户名和密码都要填"); return; }
                         if (m.length() > 0) doRegister(n, m, p); else doLogin(n, p);
                     }
-                }).show();
+                })
+                .show();
+    }
+
+    /**
+     * 忘记密码：邮件验证码 + 新密码，**全程在 App 里**。
+     *
+     * <p>以前只有邮件里的链接，点开是浏览器网页，改完还得手动切回 App ——
+     * 手机上这个来回很烦。现在邮件里同时给一个 6 位验证码，直接输进来就行；
+     * 在电脑上收邮件的人仍然可以点链接走网页。
+     */
+    private void showForgot() {
+        final MdField mailF = new MdField(act, "注册时的邮箱");
+        final MdField codeF = new MdField(act, "6 位验证码");
+        codeF.setNumeric(true);
+        final MdField passF = new MdField(act, "新密码（至少 6 位）");
+        passF.setPassword(true);
+
+        LinearLayout box = Ui.column(act);
+        box.addView(mailF);
+        LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp1.topMargin = Ui.px(act, 10);
+        box.addView(codeF, lp1);
+        LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp2.topMargin = Ui.px(act, 10);
+        box.addView(passF, lp2);
+
+        final TextView hint = new TextView(act);
+        hint.setTextSize(11.5f);
+        hint.setTextColor(Hct.withAlpha(Theme.t().onSurfaceVariant, 0.85f));
+        hint.setPadding(Ui.px(act, 4), Ui.px(act, 8), 0, 0);
+        hint.setText("还没收到？先点「发送验证码」，邮件里的 6 位数字填在上面。");
+        box.addView(hint);
+
+        TextView sendLink = new TextView(act);
+        sendLink.setText("发送验证码");
+        sendLink.setTextSize(13);
+        sendLink.setTypeface(Ui.tfBold());
+        sendLink.setTextColor(Theme.t().primary);
+        sendLink.setPadding(Ui.px(act, 4), Ui.px(act, 10), 0, 0);
+        sendLink.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Ui.hapticLight(v);
+                String m = mailF.text().trim();
+                if (m.length() == 0) { toast("先填邮箱"); return; }
+                hint.setText("正在发送…");
+                Community.forgot(act, m, new Community.Callback() {
+                    @Override public void onResult(Object data, String error) {
+                        act.runOnUiThread(new Runnable() { @Override public void run() {
+                            hint.setText(error != null ? error
+                                    : "验证码已发出，10 分钟内有效。去邮箱看看。");
+                        }});
+                    }
+                });
+            }
+        });
+        Ui.pressable(sendLink);
+        box.addView(sendLink);
+
+        new MdDialog.Builder(act)
+                .title("重置密码")
+                .content(box)
+                .negative("取消", null)
+                .positive("重置", new MdDialog.OnClick() {
+                    @Override public void onClick() {
+                        String m = mailF.text().trim();
+                        String c = codeF.text().trim();
+                        String p = passF.text();
+                        if (m.length() == 0 || c.length() == 0) { toast("邮箱和验证码都要填"); return; }
+                        if (p.length() < 6) { toast("新密码至少 6 位"); return; }
+                        Community.resetCode(act, m, c, p, new Community.Callback() {
+                            @Override public void onResult(Object data, String error) {
+                                act.runOnUiThread(new Runnable() { @Override public void run() {
+                                    if (error != null) { toast(error); return; }
+                                    toast("密码已重置，用新密码登录吧");
+                                }});
+                            }
+                        });
+                    }
+                })
+                .show();
     }
 
     private void doLogin(String n, String p) {
