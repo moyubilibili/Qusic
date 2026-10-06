@@ -231,13 +231,16 @@ public class CommunityPage {
                 card.addView(nt);
             }
 
+            LinearLayout metaRow = Ui.row(c);
+            metaRow.setPadding(0, Ui.px(c, 8), 0, 0);
+            metaRow.setGravity(Gravity.CENTER_VERTICAL);
+            metaRow.addView(authorView(c, t, p.author, p.role));
             TextView meta = new TextView(c);
-            meta.setText(p.author + " · " + p.count + " 首 · ♥ " + p.likes
-                    + " · 浏览 " + p.views);
+            meta.setText(" · " + p.count + " 首 · ♥ " + p.likes + " · 浏览 " + p.views);
             meta.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.7f));
             meta.setTextSize(11.5f);
-            meta.setPadding(0, Ui.px(c, 8), 0, 0);
-            card.addView(meta);
+            metaRow.addView(meta);
+            card.addView(metaRow);
 
             card.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
@@ -301,13 +304,16 @@ public class CommunityPage {
         tt.setTypeface(Ui.tfBold());
         body.addView(tt);
 
+        LinearLayout mRow = Ui.row(c);
+        mRow.setPadding(0, Ui.px(c, 6), 0, Ui.px(c, 10));
+        mRow.setGravity(Gravity.CENTER_VERTICAL);
+        mRow.addView(authorView(c, t, p.author, p.role));
         TextView meta = new TextView(c);
-        meta.setText(p.author + " 分享 · " + p.count + " 首 · ♥ " + p.likes
-                + " · 浏览 " + p.views);
+        meta.setText(" 分享 · " + p.count + " 首 · ♥ " + p.likes + " · 浏览 " + p.views);
         meta.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.8f));
         meta.setTextSize(12);
-        meta.setPadding(0, Ui.px(c, 6), 0, Ui.px(c, 10));
-        body.addView(meta);
+        mRow.addView(meta);
+        body.addView(mRow);
 
         if (p.note.length() > 0) {
             TextView nt = new TextView(c);
@@ -422,12 +428,10 @@ public class CommunityPage {
         for (Community.Comment cm : cs) {
             LinearLayout row = Ui.column(c);
             row.setPadding(0, Ui.px(c, 7), 0, Ui.px(c, 7));
-            TextView a = new TextView(c);
-            a.setText(cm.author);
-            a.setTextSize(12);
-            a.setTypeface(Ui.tfBold());
-            a.setTextColor(Hct.withAlpha(t.primary, 0.9f));
-            row.addView(a);
+            LinearLayout aRow = Ui.row(c);
+            aRow.setGravity(Gravity.CENTER_VERTICAL);
+            aRow.addView(authorView(c, t, cm.author, cm.role));
+            row.addView(aRow);
             TextView b = new TextView(c);
             b.setText(cm.body);
             b.setTextSize(13.5f);
@@ -436,6 +440,43 @@ public class CommunityPage {
             row.addView(b);
             commentBox.addView(row);
         }
+    }
+
+    /**
+     * 作者名，带「开发者」徽章。
+     *
+     * <p>徽章是 MD3 的**小号 assist chip** 造型：主色容器底 + 主色文字 + 全圆角，
+     * 尺寸压到最小，不抢歌单标题的视觉重心。
+     */
+    private LinearLayout authorView(Context c, Tokens t, String name, int role) {
+        LinearLayout row = Ui.row(c);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView n = new TextView(c);
+        n.setText(name);
+        n.setTextSize(12);
+        n.setTypeface(Ui.tfBold());
+        n.setTextColor(Hct.withAlpha(t.primary, 0.95f));
+        row.addView(n);
+
+        if (role == 1) {
+            TextView badge = new TextView(c);
+            badge.setText("开发者");
+            badge.setTextSize(9.5f);
+            badge.setTypeface(Ui.tfBold());
+            badge.setTextColor(t.onPrimaryContainer);
+            badge.setPadding(Ui.px(c, 7), Ui.px(c, 2), Ui.px(c, 7), Ui.px(c, 2));
+            GradientDrawable bg = new GradientDrawable();
+            bg.setColor(t.primaryContainer);
+            bg.setCornerRadius(Ui.px(c, 20));   // 全圆角 = MD3 chip 造型
+            badge.setBackground(bg);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.leftMargin = Ui.px(c, 5);
+            row.addView(badge, lp);
+        }
+        return row;
     }
 
     // ── 动作 ────────────────────────────────────────────────────────────────

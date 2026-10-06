@@ -69,6 +69,7 @@ public final class Community {
         public long id;
         public String title = "", note = "", author = "", payload = "";
         public int count, likes, views;
+        public int role;          // 1 = 开发者
         public long created;
 
         static Post of(Object o) {
@@ -82,6 +83,7 @@ public final class Community {
             p.likes   = (int) Json.lng(o, "likes");
             p.views   = (int) Json.lng(o, "views");
             p.created = Json.lng(o, "created");
+            p.role    = (int) Json.lng(o, "author_role");
             return p;
         }
     }
@@ -89,6 +91,7 @@ public final class Community {
     public static class Comment {
         public long id;
         public String body = "", author = "";
+        public int role;
         public long created;
     }
 
@@ -146,6 +149,7 @@ public final class Community {
                         c.body = nz(Json.str(o, "body"));
                         c.author = nz(Json.str(o, "author"));
                         c.created = Json.lng(o, "created");
+                        c.role = (int) Json.lng(o, "author_role");
                         out.add(c);
                     }
                     done(cb, out, null);
