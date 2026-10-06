@@ -255,7 +255,10 @@ public class WelcomeActivity extends Activity {
     @Override protected void onActivityResult(int req, int res, android.content.Intent d) {
         super.onActivityResult(req, res, d);
         if (req == REQ_TERMS) {
-            if (res == RESULT_OK) goMain();   // 同意了，直接进主界面
+            // 这里必须走 proceed() 而不是 goMain()。
+            // goMain() 会**直接跳过欢迎页** —— 全新安装后条款页点同意，
+            // 本该接着看到欢迎/激活页，结果一路进到主界面，中间那页永远不出现。
+            if (res == RESULT_OK) proceed();
             else finish();                    // 不同意就退出
         }
     }
