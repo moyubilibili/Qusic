@@ -4,6 +4,46 @@
 
 ---
 
+## [2.5.1] — 2026-10-06
+
+### 修复
+
+- **退出播放页再进来，会显示成「没有在播放」，但音乐其实正在播**
+
+  `NowPlayingView.onAttachedToWindow` 只同步了「当前是哪首歌」：
+
+  ```java
+  s.addListener(this);
+  onSongChanged(s.current(), s.currentIndex());   // ← 只有歌，没有播放状态
+  ```
+
+  而 `playing` **只在服务状态发生变化时才推过来**。退出再进来时并没有任何变化事件，
+  所以它一直停在默认值 `false`，按钮就画成「播放」的样子。
+
+  对比了全部 5 个监听器，**只有播放页漏了这一步**：
+
+  | | |
+  |---|---|
+  | `HomePage` | ✓ 有 `onPlayStateChanged(s.isPlaying())` |
+  | `LyricsWindowService` | ✓ 有 `view.setPlaying(ps.isPlaying())` |
+  | `MiniPlayerBar` | ✓ 走 `syncFromService()`，里面有 |
+  | `FluidCloud` | ✓ 走 `syncFrom(s)`，里面有 |
+  | **`NowPlayingView`** | ✗ **漏了** |
+
+  修法是在 attach 时把当前状态**整个同步一遍**，顺带多修了两处：
+
+  1. **进度和时长也一起同步** —— 之前重进来要等下一次进度推送才跳到正确位置，
+     中间会显示 `0:00`
+  2. **`setActive(true)` 里也再对一次** —— 服务可能是异步绑定完的，
+     attach 时 `instance()` 还返回 null，那样界面会永远停在错误状态；
+     加上 `PlayerService` 的静态快照作为兜底
+
+### 体积
+
+188 KB
+
+---
+
 ## [2.5.0] — 2026-10-06
 
 ### 新增

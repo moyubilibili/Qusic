@@ -145,13 +145,48 @@ public class NowPlayingView extends View implements PlayerService.Listener {
     /** 长按队列按钮时触发（播放页用它来「添加到歌单」） */
     public void setOnAddToPlaylist(Runnable r) { this.cbAdd = r; }
 
-    public void setActive(boolean a) { active = a; if (a) startLoops(); }
+    public void setActive(boolean a) {
+        active = a;
+        if (a) {
+            // 服务可能是异步绑定完的，进前台时再对一次，避免界面停在不准确的状态
+            syncFromService(PlayerService.instance());
+            startLoops();
+        }
+    }
 
     @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
         PlayerService s = PlayerService.instance();
-        if (s != null) { s.addListener(this); onSongChanged(s.current(), s.currentIndex()); }
+        if (s != null) {
+            s.addListener(this);
+            onSongChanged(s.current(), s.currentIndex());
+        }
+        // 重进播放页要把**当前状态整个同步一遍**。
+        //
+        // playing / 进度 / 时长都是服务「发生变化时」才推过来的 ——
+        // 重新进来时并没有任何变化事件，于是 playing 一直是默认的 false，
+        // 按钮就显示成「播放」的样子（其实正在播）。这就是「退出再进来说没在播」的原因。
+        syncFromService(s);
         startEntrance();
+    }
+
+    /**
+     * 把服务的当前状态同步到界面。
+     *
+     * <p>{@code s} 为 null 时退回 {@link PlayerService} 的静态快照 ——
+     * 服务可能还没绑定完（异步 bind），那时候不能什么都不做，
+     * 否则界面会一直停在初始状态，等不到人来纠正它。
+     */
+    private void syncFromService(PlayerService s) {
+        if (s != null) {
+            onPlayStateChanged(s.isPlaying());
+            onProgress(s.position(), s.duration());
+            return;
+        }
+        onPlayStateChanged(PlayerService.sPlaying);
+        if (PlayerService.sDuration > 0) {
+            onProgress(PlayerService.sPosition, PlayerService.sDuration);
+        }
     }
 
     @Override protected void onDetachedFromWindow() {
