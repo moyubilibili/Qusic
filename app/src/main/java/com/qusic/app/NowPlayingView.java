@@ -12,6 +12,7 @@ import android.graphics.Path;
 import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.widget.Toast;
 import android.util.DisplayMetrics;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
@@ -65,8 +66,20 @@ public class NowPlayingView extends View implements PlayerService.Listener {
     // 手势状态
     /** 播放页样式：0=大封面 1=歌词页 2=极简 */
     public static final int STYLE_COVER = 0, STYLE_LYRICS = 1, STYLE_MINIMAL = 2;
+    /**
+     * 锁屏样式：模仿 ColorOS 16 锁屏播放器。
+     *
+     * <p>特点是大封面居中 + 居中排版 + 细进度条，
+     * 横屏时自动变成「左封面 / 右信息+控制」的分栏布局。
+     */
+    public static final int STYLE_LOCK = 3;
+    public static final int STYLE_COUNT = 4;
     private int style = Theme.playerStyle();
     private final RectF styleBtn = new RectF();
+    /** 锁屏样式：文字的水平中心与可用宽度（横屏时是右栏的中心） */
+    private float lockTextCx = 0f, lockTextW = 0f;
+    /** 是否处于横屏分栏布局 */
+    private boolean landscape = false;
 
     /** 歌词排版缓存：折行结果只算一次，绘制时零分配（否则每帧 GC 会明显卡顿） */
     private long lyricCacheId = -1;
@@ -235,15 +248,88 @@ public class NowPlayingView extends View implements PlayerService.Listener {
         styleBtn.set(w - dp(16) - bs, statusH + dp(10), w - dp(16), statusH + dp(10) + bs);
         lyricsPanel.set(0, 0, w, h);
 
-        // 封面：按样式给不同大小（歌词/极简页留出歌词空间）
+        // 横屏：所有样式都走「左封面 / 右内容」的分栏排法。
+        // 竖屏那套「自上而下堆」在横屏里高度不够，会挤成一团。
+        if (w > h * 1.15f) { layoutLandscape(w, h, pad, statusH, navInset); return; }
+
+        if (style == STYLE_LOCK) { layoutLockPortrait(w, h, pad, statusH, navInset); return; }
+
+        layoutPortraitStandard(w, h, pad, statusH, navInset);
+    }
+
+    /**
+     * 横屏布局：左封面 / 右信息与控制。四种样式共用。
+     *
+     * <p>歌词页在横屏时把右栏下半部分让给歌词（右栏本来就窄而高）。
+     */
+    private void layoutLandscape(int w, int h, float pad, float statusH, float navInset) {
+        landscape = true;
+        boolean lock = style == STYLE_LOCK;
+
+        float top = statusH + dp(14);
+        float bottom = h - navInset - dp(16);
+        float bandH = bottom - top;
+
+        // 封面靠左，尽量占满可用高度
+        float cs = Math.min(bandH - dp(8), w * 0.34f);
+        cs = Math.max(cs, dp(110));
+        float coverCy = top + bandH / 2f;
+        coverRect.set(dp(38), coverCy - cs / 2, dp(38) + cs, coverCy + cs / 2);
+
+        // 右栏
+        float rx = coverRect.right + dp(30);
+        float rw = w - rx - dp(34);
+        if (rw < dp(150)) {                 // 太窄就退回竖屏排法
+            landscape = false;
+            if (lock) layoutLockPortrait(w, h, pad, statusH, navInset);
+            else      layoutPortraitStandard(w, h, pad, statusH, navInset);
+            return;
+        }
+        lockTextCx = lock ? (rx + rw / 2f) : (rx + rw / 2f);
+        lockTextW = rw;
+
+        // 自上而下：标题 → 歌手 → 进度条 → 控制键，其余空间留给歌词
+        float y = top + dp(6);
+        titleY = y + dp(16);
+        subtitleY = titleY + dp(21);
+
+        float controlsCy = bottom - dp(46);
+        float pr = dp(lock ? 34 : 34);
+        float ccx = rx + rw / 2f;
+        btnPlay.set(ccx - pr, controlsCy - pr, ccx + pr, controlsCy + pr);
+        btnPrev.set(btnPlay.left - dp(74), controlsCy - dp(26),
+                btnPlay.left - dp(26), controlsCy + dp(26));
+        btnNext.set(btnPlay.right + dp(26), controlsCy - dp(26),
+                btnPlay.right + dp(74), controlsCy + dp(26));
+
+        seekCy = subtitleY + dp(34);
+        float maxSeek = controlsCy - dp(54);
+        if (seekCy > maxSeek) seekCy = maxSeek;
+        seekRect.set(rx, seekCy - dp(16), rx + rw, seekCy + dp(16));
+
+        // 次要按钮：横屏放到右栏最底部，一行四颗
+        float secCy = bottom - dp(2);
+        float secSize = dp(38);
+        float gap = (rw - secSize * 4) / 3f;
+        if (gap < dp(2)) gap = dp(2);
+        btnShuffle.set(rx, secCy - secSize / 2, rx + secSize, secCy + secSize / 2);
+        btnHeart.set(btnShuffle.right + gap, secCy - secSize / 2,
+                btnShuffle.right + gap + secSize, secCy + secSize / 2);
+        btnQueue.set(btnHeart.right + gap, secCy - secSize / 2,
+                btnHeart.right + gap + secSize, secCy + secSize / 2);
+        btnRepeat.set(btnQueue.right + gap, secCy - secSize / 2,
+                btnQueue.right + gap + secSize, secCy + secSize / 2);
+    }
+
+    /** 竖屏 · 非锁屏样式的原有排法（从 layout 里抽出来，便于横屏时回退调用） */
+    private void layoutPortraitStandard(int w, int h, float pad, float statusH, float navInset) {
+        float bs = dp(42);
         float cs = Math.min(w - pad * 2, h * (style == STYLE_COVER ? 0.42f
                 : style == STYLE_LYRICS ? 0.22f : 0.15f));
         float cx = w / 2f;
         float coverTop = statusH + dp(56);
         coverRect.set(cx - cs / 2, coverTop, cx + cs / 2, coverTop + cs);
 
-        // 排版顺序（自上而下）：封面 → 标题 → 副标题 → 进度条 → 主控制 → 次要按钮
-        // 其中控制区从底部往上锚定，保证任何屏幕尺寸下都不会互相压住。
         titleY = coverRect.bottom + dp(32);
         subtitleY = titleY + dp(21);
 
@@ -266,12 +352,60 @@ public class NowPlayingView extends View implements PlayerService.Listener {
         btnNext.set(btnPlay.right + dp(26), controlsCy - dp(32),
                 btnPlay.right + dp(82), controlsCy + dp(32));
 
-        // 进度条紧贴副标题下方（原来放在正中会空出一大段，看着很散）
         seekCy = subtitleY + dp(40);
-        // 但也要保证不压到控制键
         float maxSeekCy = controlsCy - dp(58);
         if (seekCy > maxSeekCy) seekCy = maxSeekCy;
         seekRect.set(pad, seekCy - dp(18), w - pad, seekCy + dp(18));
+    }
+
+    private void layoutLockPortrait(int w, int h, float pad, float statusH, float navInset) {
+        landscape = false;
+        float cx = w / 2f;
+        lockTextCx = cx;
+        lockTextW = w - dp(56);
+
+        // 封面尽量大 —— 锁屏播放器的视觉重心就是这张图
+        float cs = Math.min(w - dp(72), (h - statusH - navInset) * 0.42f);
+        cs = Math.max(cs, dp(140));
+        float coverTop = statusH + dp(64);
+        coverRect.set(cx - cs / 2, coverTop, cx + cs / 2, coverTop + cs);
+
+        titleY = coverRect.bottom + dp(40);
+        subtitleY = titleY + dp(22);
+
+        float secCy = h - navInset - dp(40);
+        layoutLockSecondary(w, h, pad, navInset, true);
+
+        float controlsCy = secCy - dp(84);
+        float pr = dp(36);
+        btnPlay.set(cx - pr, controlsCy - pr, cx + pr, controlsCy + pr);
+        btnPrev.set(btnPlay.left - dp(80), controlsCy - dp(30),
+                btnPlay.left - dp(24), controlsCy + dp(30));
+        btnNext.set(btnPlay.right + dp(24), controlsCy - dp(30),
+                btnPlay.right + dp(80), controlsCy + dp(30));
+
+        seekCy = subtitleY + dp(46);
+        float maxSeek = controlsCy - dp(56);
+        if (seekCy > maxSeek) seekCy = maxSeek;
+        if (seekCy < coverRect.bottom + dp(24)) seekCy = coverRect.bottom + dp(24);
+        seekRect.set(pad + dp(4), seekCy - dp(16), w - pad - dp(4), seekCy + dp(16));
+    }
+
+    /** 次要按钮（随机/收藏/队列/循环）：锁屏样式把它们排成一行 */
+    private void layoutLockSecondary(int w, int h, float pad, float navInset, boolean portrait) {
+        float secCy = h - navInset - (portrait ? dp(40) : dp(20));
+        float secSize = dp(42);
+        float avail = portrait ? (w - dp(48)) : (w - coverRect.right - dp(48));
+        float left = portrait ? dp(24) : (coverRect.right + dp(20));
+        float gap = (avail - secSize * 4) / 3f;
+        if (gap < dp(4)) gap = dp(4);
+        btnShuffle.set(left, secCy - secSize / 2, left + secSize, secCy + secSize / 2);
+        btnHeart.set(btnShuffle.right + gap, secCy - secSize / 2,
+                btnShuffle.right + gap + secSize, secCy + secSize / 2);
+        btnQueue.set(btnHeart.right + gap, secCy - secSize / 2,
+                btnHeart.right + gap + secSize, secCy + secSize / 2);
+        btnRepeat.set(btnQueue.right + gap, secCy - secSize / 2,
+                btnQueue.right + gap + secSize, secCy + secSize / 2);
     }
 
     // ── 绘制 ────────────────────────────────────────────────────────────────
@@ -296,16 +430,20 @@ public class NowPlayingView extends View implements PlayerService.Listener {
         // 之前这里用 saveLayerAlpha 做淡出 —— 那是全屏图层，每帧都要分配一块
         // 和屏幕一样大的缓冲，是上滑卡顿的主因。直接不画更便宜也更干净。
         if (lp <= 0.5f) {
-            drawCover(c, t, coverOff, coverAlpha);
-            drawTitle(c, t);
-            drawSeek(c, t);
-            drawControls(c, t);
-            drawSecondary(c, t);
+            if (style == STYLE_LOCK) {
+                drawLockStyle(c, t, coverOff, coverAlpha);
+            } else {
+                drawCover(c, t, coverOff, coverAlpha);
+                drawTitle(c, t);
+                drawSeek(c, t);
+                drawControls(c, t);
+                drawSecondary(c, t);
+            }
         }
         c.restoreToCount(save);
 
         // 歌词页 / 极简页：在控件下方铺一整块滚动歌词
-        if (style != STYLE_COVER && lp < 0.5f) {
+        if (style != STYLE_COVER && style != STYLE_LOCK && lp < 0.5f) {
             // 关键：两种样式的歌词区都必须从**进度条下方**开始。
             // 之前歌词页用的是 subtitleY + 26dp，而进度条在 subtitleY + 40dp，
             // 于是歌词直接压在进度条和时长上（就是「叠在一起」的那个现象）。
@@ -543,8 +681,9 @@ public class NowPlayingView extends View implements PlayerService.Listener {
         RectF ib = new RectF(btnShuffle); ib.inset(dp(13), dp(13));
         Icons.draw(c, "shuffle", ib, sh == PlayerService.SHUFFLE_ON ? active : dim, 1f, p);
 
+        boolean fav = song != null && Favorites.has(song);
         ib.set(btnHeart); ib.inset(dp(13), dp(13));
-        Icons.draw(c, "heart", ib, dim, 1f, p);
+        Icons.draw(c, fav ? "heart_fill" : "heart", ib, fav ? active : dim, 1f, p);
 
         ib.set(btnQueue); ib.inset(dp(13), dp(13));
         Icons.draw(c, "queue", ib, dim, 1f, p);
@@ -947,6 +1086,15 @@ public class NowPlayingView extends View implements PlayerService.Listener {
         if (btnPlay.contains(x, y)) { Ui.hapticLight(this); s.toggle(); return; }
         if (btnPrev.contains(x, y)) { Ui.hapticLight(this); s.prev(); return; }
         if (btnNext.contains(x, y)) { Ui.hapticLight(this); s.next(true); return; }
+        if (btnHeart.contains(x, y)) {
+            Ui.hapticStrong(this);
+            if (song == null) return;
+            boolean now = Favorites.toggle(getContext(), song);
+            Toast.makeText(getContext(), now ? "已收藏" : "已取消收藏",
+                    Toast.LENGTH_SHORT).show();
+            invalidate();
+            return;
+        }
         if (btnShuffle.contains(x, y)) { Ui.hapticLight(this); s.toggleShuffle(); return; }
         if (btnRepeat.contains(x, y)) { Ui.hapticLight(this); s.cycleRepeat(); return; }
         if (btnQueue.contains(x, y)) {
@@ -995,12 +1143,159 @@ public class NowPlayingView extends View implements PlayerService.Listener {
 
     /** 循环切换三种播放页样式 */
     public void cycleStyle() {
-        style = (style + 1) % 3;
+        style = (style + 1) % STYLE_COUNT;
         Theme.setPlayerStyle(style);
         lyricScroll = lyricScrollTarget = 0;
         lastCurLine = -1;
         requestLayout();
         invalidate();
+    }
+
+    /**
+     * 锁屏样式绘制 —— 模仿 ColorOS 16 锁屏播放器。
+     *
+     * <p>和「大封面」样式的区别：
+     * <ul>
+     *   <li>封面更大、圆角更重，是整个界面的视觉重心</li>
+     *   <li>标题 / 歌手 / 进度条 / 控制键**全部居中**，而不是左对齐</li>
+     *   <li>进度条更细（3dp 而不是 5dp），滑块更小，更像锁屏上的那种克制观感</li>
+     *   <li>横屏时变成左右分栏，封面靠左、信息与控制靠右</li>
+     * </ul>
+     */
+    private void drawLockStyle(Canvas c, Tokens t, float coverOff, float coverAlpha) {
+        // ── 封面：大圆角 + 柔和投影 ──
+        float r = dp(26);
+        int save = c.save();
+        if (coverAlpha < 1f) {
+            c.saveLayerAlpha(coverRect.left - dp(20), coverRect.top - dp(20),
+                    coverRect.right + dp(20), coverRect.bottom + dp(20),
+                    (int) (255 * coverAlpha), Canvas.ALL_SAVE_FLAG);
+        }
+
+        p.reset(); p.setStyle(Paint.Style.FILL);
+        if (cover != null && !cover.isRecycled()) {
+            tmpPath.reset();
+            tmpPath.addRoundRect(coverRect, r, r, Path.Direction.CW);
+            c.save();
+            c.clipPath(tmpPath);
+            c.translate(coverOff, 0);
+            Draw.bitmapCrop(c, cover, coverRect, p);
+            c.restore();
+        } else {
+            // 没封面：主题渐变 + 音符
+            android.graphics.LinearGradient lg = new android.graphics.LinearGradient(
+                    coverRect.left, coverRect.top, coverRect.right, coverRect.bottom,
+                    Hct.blendLab(t.primaryContainer, t.surface, 0.15f),
+                    Hct.blendLab(t.tertiaryContainer, t.surface, 0.30f),
+                    Shader.TileMode.CLAMP);
+            p.setShader(lg);
+            tmpPath.reset();
+            tmpPath.addRoundRect(coverRect, r, r, Path.Direction.CW);
+            c.drawPath(tmpPath, p);
+            p.setShader(null);
+            RectF ib = new RectF(coverRect);
+            ib.inset(coverRect.width() * 0.34f, coverRect.height() * 0.34f);
+            Icons.draw(c, "note", ib, Hct.withAlpha(t.onPrimaryContainer, 0.5f), 1f, p);
+        }
+
+        // 高光描边，让封面边缘更利落
+        p.reset(); p.setStyle(Paint.Style.STROKE); p.setStrokeWidth(dp(1));
+        p.setColor(Hct.withAlpha(0xFFFFFFFF, 0.14f));
+        tmpPath.reset();
+        tmpPath.addRoundRect(coverRect, r, r, Path.Direction.CW);
+        c.drawPath(tmpPath, p);
+        p.setStyle(Paint.Style.FILL);
+
+        if (coverAlpha < 1f) c.restoreToCount(save);
+
+        // ── 标题 / 歌手（居中）──
+        float cx = lockTextCx;
+        float tw = lockTextW > 0 ? lockTextW : getWidth() - dp(56);
+
+        p.reset(); p.setTextAlign(Paint.Align.CENTER);
+        p.setTypeface(Ui.tfBold()); p.setTextSize(dp(landscape ? 20 : 22));
+        p.setColor(0xFFFFFFFF);
+        c.drawText(ellipsize(song != null ? song.title : "", p, tw), cx, titleY, p);
+
+        p.setTypeface(Ui.tf()); p.setTextSize(dp(13.5f));
+        p.setColor(Hct.withAlpha(0xFFFFFFFF, 0.68f));
+        c.drawText(ellipsize(song != null ? song.subtitle() : "", p, tw), cx, subtitleY, p);
+
+        // ── 细进度条 ──
+        drawLockSeek(c);
+
+        // ── 控制键 ──
+        RectF ib = new RectF(btnPrev); ib.inset(dp(16), dp(16));
+        Icons.draw(c, "prev", ib, 0xFFFFFFFF, 1f, p);
+        ib.set(btnNext); ib.inset(dp(16), dp(16));
+        Icons.draw(c, "next", ib, 0xFFFFFFFF, 1f, p);
+
+        float pr = btnPlay.width() / 2f;
+        float pcx = btnPlay.centerX(), pcy = btnPlay.centerY();
+        p.reset(); p.setStyle(Paint.Style.FILL);
+        p.setColor(Hct.withAlpha(0xFFFFFFFF, 0.94f));
+        c.drawCircle(pcx, pcy, pr, p);
+        RectF pb = new RectF(btnPlay);
+        pb.inset(pr * 0.62f, pr * 0.62f);
+        // 白底上用深色图标 —— 锁屏播放器就是这个观感
+        Icons.draw(c, playing ? "pause" : "play", pb, 0xFF101018, 1f, p);
+
+        // ── 次要按钮 ──
+        drawLockSecondary(c, t);
+    }
+
+    /** 锁屏样式的细进度条：轨道 3dp、滑块小、时间在两端 */
+    private void drawLockSeek(Canvas c) {
+        float y = seekRect.centerY();
+        float l = seekRect.left, r = seekRect.right, w = r - l;
+        float shown = seeking && seekTarget >= 0 ? seekTarget : progress;
+
+        p.reset(); p.setStyle(Paint.Style.STROKE); p.setStrokeCap(Paint.Cap.ROUND);
+        p.setStrokeWidth(dp(3.5f));
+        p.setColor(Hct.withAlpha(0xFFFFFFFF, 0.20f));
+        c.drawLine(l, y, r, y, p);
+        p.setColor(0xFFFFFFFF);
+        c.drawLine(l, y, l + w * clamp01(shown), y, p);
+
+        if (seeking) {
+            p.reset(); p.setStyle(Paint.Style.FILL);
+            p.setColor(0xFFFFFFFF);
+            c.drawCircle(l + w * clamp01(shown), y, dp(7), p);
+        }
+
+        long cur = seeking && seekTarget >= 0 ? (long) (seekTarget * durMs) : posMs;
+        p.reset(); p.setTextSize(dp(11)); p.setTypeface(Ui.tfMed());
+        p.setColor(Hct.withAlpha(0xFFFFFFFF, 0.55f));
+        p.setTextAlign(Paint.Align.LEFT);
+        c.drawText(Ui.mmss(cur), l, y + dp(22), p);
+        p.setTextAlign(Paint.Align.RIGHT);
+        c.drawText(Ui.mmss(durMs), r, y + dp(22), p);
+    }
+
+    /** 锁屏样式的次要按钮：半透明圆底 + 图标 */
+    private void drawLockSecondary(Canvas c, Tokens t) {
+        PlayerService s = PlayerService.instance();
+        int rep = s != null ? s.repeatMode() : PlayerService.REPEAT_ALL;
+        int sh = s != null ? s.shuffleMode() : PlayerService.SHUFFLE_OFF;
+
+        drawLockSecBtn(c, btnShuffle, "shuffle", sh == PlayerService.SHUFFLE_ON);
+        drawLockSecBtn(c, btnHeart,
+                song != null && Favorites.has(song) ? "heart_fill" : "heart",
+                song != null && Favorites.has(song));
+        drawLockSecBtn(c, btnQueue, "queue", false);
+        drawLockSecBtn(c, btnRepeat, rep == PlayerService.REPEAT_ONE ? "repeat_one" : "repeat",
+                rep != PlayerService.REPEAT_OFF);
+    }
+
+    private void drawLockSecBtn(Canvas c, RectF box, String icon, boolean active) {
+        if (box.width() <= 0) return;
+        p.reset(); p.setStyle(Paint.Style.FILL);
+        p.setColor(Hct.withAlpha(0xFFFFFFFF, active ? 0.20f : 0.08f));
+        c.drawCircle(box.centerX(), box.centerY(), box.width() / 2f, p);
+        RectF ib = new RectF(box);
+        ib.inset(box.width() * 0.28f, box.height() * 0.28f);
+        Icons.draw(c, icon, ib,
+                Hct.withAlpha(0xFFFFFFFF, active ? 1f : 0.7f), 1f, p);
     }
 
     private void drawStyleButton(Canvas c, Tokens t) {
@@ -1013,7 +1308,9 @@ public class NowPlayingView extends View implements PlayerService.Listener {
         RectF ib = new RectF(styleBtn);
         ib.inset(dp(12), dp(12));
         // 三个样式用不同图标暗示
-        String ic = style == STYLE_COVER ? "list" : style == STYLE_LYRICS ? "equalizer" : "note";
+        String ic = style == STYLE_COVER ? "list"
+                : style == STYLE_LYRICS ? "equalizer"
+                : style == STYLE_LOCK ? "lock" : "note";
         Icons.draw(c, ic, ib, Hct.withAlpha(0xFFFFFFFF, 0.9f * (1 - lp)), 1f, p);
 
         if (lp < 0.05f) {
@@ -1021,7 +1318,8 @@ public class NowPlayingView extends View implements PlayerService.Listener {
             p.setTypeface(Ui.tfMed()); p.setTextSize(dp(9.5f));
             p.setColor(Hct.withAlpha(0xFFFFFFFF, 0.45f));
             String label = style == STYLE_COVER ? "封面"
-                    : style == STYLE_LYRICS ? "歌词" : "极简";
+                    : style == STYLE_LYRICS ? "歌词"
+                    : style == STYLE_LOCK ? "锁屏" : "极简";
             c.drawText(label, styleBtn.centerX(), styleBtn.bottom + dp(13), p);
         }
     }

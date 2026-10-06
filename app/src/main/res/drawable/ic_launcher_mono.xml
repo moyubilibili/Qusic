@@ -1,33 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  前景层：一个「Q」，同时是一张唱片。
-
-  · 粗环 = Q 的圈 / 黑胶的盘面
-  · 中心点 = 唱片轴孔（也是 Q 的圈心）
-  · 右下 45° 的短棒 = Q 的尾巴
-
-  MD3 自适应图标规范：
-  · 画布 108×108，安全区是居中的 66×66（即 21~87）
-  · 图形最外沿距中心 24，尾巴尖端约 31.5 —— 都在安全区内，
-    所以无论系统用圆形、方形还是圆角方形裁切都不会被切到
-  · 全部是实心几何图形，没有渐变和发光
+  Monochrome 层：Android 13+ 的「主题图标」用它。
+  系统会把这一层**整体染成壁纸配色**，所以这里必须是纯单色剪影 ——
+  不能有渐变、不能用多个颜色，否则染色后会出现奇怪的色块。
+  形状与前景层保持一致。
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
 
-    <!-- 盘面：半径 18、描边 12 的圆环（外 24 / 内 12） -->
     <path
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="12"
         android:pathData="M54,54 m-18,0 a18,18 0 1,1 36,0 a18,18 0 1,1 -36,0" />
 
-    <!-- 轴孔 -->
     <path
         android:fillColor="#FFFFFFFF"
         android:pathData="M54,54 m-5.5,0 a5.5,5.5 0 1,1 11,0 a5.5,5.5 0 1,1 -11,0" />
 
-    <!-- 尾巴：从环带内部伸出，圆头收尾 -->
     <path
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="11"

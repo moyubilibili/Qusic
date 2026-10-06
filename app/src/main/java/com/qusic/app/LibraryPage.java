@@ -2,6 +2,8 @@ package com.qusic.app;
 
 import android.content.Context;
 import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.view.Gravity;
@@ -27,8 +29,10 @@ import java.util.List;
  */
 public class LibraryPage {
 
-    private static final int MODE_SONGS = 0, MODE_ALBUMS = 1, MODE_ARTISTS = 2,
-            MODE_HISTORY = 3, MODE_PLAYLISTS = 4;
+    // 只有 4 个分段了 —— 原本 6 个（歌曲/专辑/歌手/最近/歌单/收藏）时
+    // 每格只有 56dp，中文标签挤在一起很难看。专辑和歌手页撤掉。
+    private static final int MODE_SONGS = 0, MODE_HISTORY = 1,
+            MODE_PLAYLISTS = 2, MODE_FAVORITES = 3;
 
     private final MainActivity act;
     private View root;
@@ -38,6 +42,14 @@ public class LibraryPage {
     private LinearLayout emptyBox;
     private LinearLayout opsRow;
     /** 多选操作栏（选中歌曲时出现） */
+    // ── 历史 / 收藏的多选 ──
+    // 这两个列表用的是普通 LinearLayout 行，不是 SongListView，
+    // 所以用不上它内置的那套多选，得自己来一份。
+    private boolean hostSelecting;
+    private final java.util.LinkedHashSet<Long> hostSelected = new java.util.LinkedHashSet<>();
+    /** 当前多选所在的那个列表（历史或收藏），加歌单时要用 */
+    private List<Song> hostItems = new ArrayList<>();
+
     private LinearLayout selRow;
     private TextView selCountLabel;
     private android.widget.ScrollView plScroll;
@@ -46,6 +58,8 @@ public class LibraryPage {
     private long openListId;
     private android.widget.ScrollView historyScroll;
     private LinearLayout historyBox;
+    private android.widget.ScrollView favScroll;
+    private LinearLayout favBox;
     private SegmentedBar segmented;
     private TextView countLabel;
     private TextView importBtn;
@@ -117,11 +131,15 @@ public class LibraryPage {
         countLabel.setPadding(0, Ui.px(c, 2), 0, Ui.px(c, 14));
         header.addView(countLabel);
 
-        segmented = new SegmentedBar(c, new String[]{"歌曲", "专辑", "歌手", "最近", "歌单"});
+        segmented = new SegmentedBar(c, new String[]{"歌曲", "最近", "歌单", "收藏"});
         segmented.setOnChange(new SegmentedBar.OnChange() {
             @Override public void onChange(int i) {
                 // 换分段时退出多选 —— 选的歌可能在新分段里根本看不见
                 if (listView != null) listView.exitSelection();
+                // 切分段时把所有列表都收起来，交给 refresh() 决定显示哪个
+                if (favScroll != null) favScroll.setVisibility(View.GONE);
+                // 切分段时退出多选 —— 选的歌在新分段里可能根本看不见
+                if (hostSelecting) hostExitSelection();
                 mode = i;
                 applyMode();
             }
@@ -223,13 +241,22 @@ public class LibraryPage {
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
 
         selRow.addView(selBtn(c, t, "全选", false, new Runnable() {
-            @Override public void run() { listView.toggleSelectAll(); }
+            @Override public void run() {
+                if (hostSelecting) hostToggleAll();
+                else listView.toggleSelectAll();
+            }
         }));
         selRow.addView(selBtn(c, t, "添加到歌单", true, new Runnable() {
-            @Override public void run() { addSelectedToPlaylist(); }
+            @Override public void run() {
+                if (hostSelecting) hostAddToPlaylist();
+                else addSelectedToPlaylist();
+            }
         }));
         selRow.addView(selBtn(c, t, "取消", false, new Runnable() {
-            @Override public void run() { listView.exitSelection(); }
+            @Override public void run() {
+                if (hostSelecting) hostExitSelection();
+                else listView.exitSelection();
+            }
         }));
         header.addView(selRow);
         col.addView(header);
@@ -278,6 +305,17 @@ public class LibraryPage {
         historyBox.setPadding(pad, Ui.px(c, 6), pad, act.contentBottomInset());
         historyScroll.addView(historyBox);
         col.addView(historyScroll, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        // 收藏列表（跟历史一样自成一体，因为里面也有在线歌曲）
+        favScroll = new android.widget.ScrollView(c);
+        favScroll.setVerticalScrollBarEnabled(false);
+        favScroll.setClipToPadding(false);
+        favScroll.setVisibility(View.GONE);
+        favBox = Ui.column(c);
+        favBox.setPadding(pad, Ui.px(c, 6), pad, act.contentBottomInset());
+        favScroll.addView(favBox);
+        col.addView(favScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         // 歌单（列表 / 详情共用一个容器，靠 openListId 区分层级）
@@ -377,10 +415,9 @@ public class LibraryPage {
         if (plScroll != null) plScroll.setVisibility(View.GONE);
         openListId = 0;
         if (mode == MODE_HISTORY) {
-            // 历史模式：把歌曲列表、分组列表、空状态全部关掉，
+            // 历史模式：把歌曲列表和空状态都关掉，
             // 否则「曲库还是空的」会压在历史列表上面（之前就是这个 bug）
             listView.setVisibility(View.GONE);
-            albumScroll.setVisibility(View.GONE);
             emptyBox.setVisibility(View.GONE);
             historyScroll.setVisibility(View.VISIBLE);
             if (opsRow != null) opsRow.setVisibility(View.GONE);   // 排序/随机播放对历史无意义
@@ -388,25 +425,40 @@ public class LibraryPage {
             return;
         }
         historyScroll.setVisibility(View.GONE);
+        // 歌单和收藏各有自己的容器，交给 refresh() 分派
+        if (mode == MODE_PLAYLISTS || mode == MODE_FAVORITES) { refresh(); return; }
         if (opsRow != null) opsRow.setVisibility(View.VISIBLE);
         if (Library.isEmpty()) { refresh(); return; }
         emptyBox.setVisibility(View.GONE);
-        boolean songs = mode == MODE_SONGS;
-        listView.setVisibility(songs ? View.VISIBLE : View.GONE);
-        albumScroll.setVisibility(songs ? View.GONE : View.VISIBLE);
-        if (!songs) buildGroups();
+        listView.setVisibility(View.VISIBLE);
     }
 
     public void refresh() {
         if (listView == null) return;
         boolean has = Library.count() > 0;
 
-        emptyBox.setVisibility(has || mode == MODE_HISTORY ? View.GONE : View.VISIBLE);
+        emptyBox.setVisibility(has || mode == MODE_HISTORY || mode == MODE_FAVORITES
+                ? View.GONE : View.VISIBLE);
         // 「最近」即使曲库为空也有意义（在线听过的歌也在历史里）
         segmented.setVisibility(View.VISIBLE);
         importBtn.setVisibility(has ? View.VISIBLE : View.GONE);
         boolean hist = mode == MODE_HISTORY;
         boolean pls = mode == MODE_PLAYLISTS;
+        boolean fav = mode == MODE_FAVORITES;
+        if (fav) {
+            // 收藏页：跟「最近」一样是自成一体的列表，不走曲库那套
+            listView.setVisibility(View.GONE);
+            albumScroll.setVisibility(View.GONE);
+            emptyBox.setVisibility(View.GONE);
+            historyScroll.setVisibility(View.GONE);
+            if (plScroll != null) plScroll.setVisibility(View.GONE);
+            if (opsRow != null) opsRow.setVisibility(View.GONE);
+            favScroll.setVisibility(View.VISIBLE);
+            countLabel.setText(Favorites.count() + " 首收藏");
+            buildFavorites();
+            return;
+        }
+        if (favScroll != null) favScroll.setVisibility(View.GONE);
         if (pls) {
             listView.setVisibility(View.GONE);
             albumScroll.setVisibility(View.GONE);
@@ -420,7 +472,6 @@ public class LibraryPage {
         }
         if (plScroll != null) plScroll.setVisibility(View.GONE);
         listView.setVisibility(has && mode == MODE_SONGS ? View.VISIBLE : View.GONE);
-        albumScroll.setVisibility(has && mode != MODE_SONGS && !hist ? View.VISIBLE : View.GONE);
         historyScroll.setVisibility(hist ? View.VISIBLE : View.GONE);
         if (hist) emptyBox.setVisibility(View.GONE);
         if (opsRow != null) opsRow.setVisibility(hist ? View.GONE : View.VISIBLE);
@@ -439,7 +490,6 @@ public class LibraryPage {
         }
 
         if (hist) buildHistory();
-        else if (has && mode != MODE_SONGS) buildGroups();
     }
 
     private void sort(List<Song> l) {
@@ -457,32 +507,6 @@ public class LibraryPage {
             @Override public int compare(Song a, Song b) { return a.title.compareToIgnoreCase(b.title); }
         };
         Collections.sort(l, cmp);
-    }
-
-    private void buildGroups() {
-        Context c = act;
-        Tokens t = Theme.t();
-        albumBox.removeAllViews();
-
-        if (mode == MODE_ALBUMS) {
-            for (Library.Album a : Library.albums()) {
-                albumBox.addView(albumRow(c, t, a.name, a.artist, a.songs, a.durationMs));
-            }
-        } else {
-            java.util.LinkedHashMap<String, List<Song>> map = new java.util.LinkedHashMap<>();
-            for (Song s : Library.songs()) {
-                String k = (s.artist == null || s.artist.length() == 0) ? "未知歌手" : s.artist;
-                List<Song> l = map.get(k);
-                if (l == null) { l = new ArrayList<>(); map.put(k, l); }
-                l.add(s);
-            }
-            for (java.util.Map.Entry<String, List<Song>> e : map.entrySet()) {
-                long total = 0;
-                for (Song s : e.getValue()) total += s.durationMs;
-                albumBox.addView(albumRow(c, t, e.getKey(), e.getValue().size() + " 首",
-                        e.getValue(), total));
-            }
-        }
     }
 
     private View albumRow(Context c, Tokens t, final String name, String sub,
@@ -861,7 +885,17 @@ public class LibraryPage {
     /** 「添加到歌单」—— 直接复用 Playlist 里的公用弹窗 */
     // ── 多选 ───────────────────────────────────────────────────────────────
     /** 是否正处在多选模式（给返回键用） */
-    public boolean isSelecting() { return listView != null && listView.isSelecting(); }
+    /** 是否处于多选（歌曲列表或历史/收藏任一处）。
+     *  MainActivity 用它决定返回键是先退出多选还是切页。 */
+    public boolean isSelecting() {
+        return hostSelecting || (listView != null && listView.isSelecting());
+    }
+
+    /** 统一的「退出多选」入口，给返回键用 */
+    public void exitAnySelection() {
+        if (hostSelecting) hostExitSelection();
+        else if (listView != null) listView.exitSelection();
+    }
     public void exitSelection() { if (listView != null) listView.exitSelection(); }
 
     private TextView selBtn(Context c, Tokens t, String label, boolean primary,
@@ -915,6 +949,50 @@ public class LibraryPage {
         Playlist.showAddDialog(act, song, new Runnable() {
             @Override public void run() { refresh(); }
         });
+    }
+
+    // ── 收藏 ────────────────────────────────────────────────────────────────
+    private void buildFavorites() {
+        Context c = act;
+        Tokens t = Theme.t();
+        favBox.removeAllViews();
+
+        final List<Song> items = Favorites.items();
+        if (items.isEmpty()) {
+            TextView tv = new TextView(c);
+            tv.setText("还没有收藏的歌。\n在播放页点心形按钮，或长按任意一首歌选「收藏」。");
+            tv.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.85f));
+            tv.setTextSize(13);
+            tv.setLineSpacing(Ui.px(c, 5), 1f);
+            tv.setPadding(0, Ui.px(c, 10), 0, Ui.px(c, 10));
+            favBox.addView(tv);
+            return;
+        }
+
+        LinearLayout tools = Ui.row(c);
+        tools.setPadding(0, Ui.px(c, 2), 0, Ui.px(c, 10));
+        TextView all = new TextView(c);
+        all.setText("播放全部");
+        all.setTextSize(12.5f);
+        all.setTypeface(Ui.tfBold());
+        all.setTextColor(t.onPrimary);
+        all.setPadding(Ui.px(c, 14), Ui.px(c, 8), Ui.px(c, 14), Ui.px(c, 8));
+        all.setBackground(pill(t.primary, Ui.px(c, 20)));
+        all.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Ui.hapticLight(v);
+                playFromHistory(items, 0);
+            }
+        });
+        tools.addView(all);
+        favBox.addView(tools);
+
+        for (int i = 0; i < items.size(); i++) {
+            final int idx = i;
+            favBox.addView(historyRow(c, t, items.get(i), new Runnable() {
+                @Override public void run() { playFromHistory(items, idx); }
+            }));
+        }
     }
 
     // ── 最近播放 ────────────────────────────────────────────────────────────
@@ -993,6 +1071,25 @@ public class LibraryPage {
         LinearLayout row = Ui.row(c);
         row.setPadding(0, Ui.px(c, 7), 0, Ui.px(c, 7));
 
+        // 多选模式下：选中的行有底色 + 左侧勾选圈
+        final boolean picked = hostSelecting && hostSelected.contains(s.id);
+        if (hostSelecting) {
+            android.graphics.drawable.GradientDrawable sb =
+                    new android.graphics.drawable.GradientDrawable();
+            sb.setColor(picked ? Hct.withAlpha(t.primary, 0.16f) : 0x00000000);
+            sb.setCornerRadius(Ui.px(c, 12));
+            row.setBackground(sb);
+            row.setPadding(Ui.px(c, 8), Ui.px(c, 7), Ui.px(c, 8), Ui.px(c, 7));
+        }
+
+        if (hostSelecting) {
+            CheckDot dot = new CheckDot(c, picked, t.primary, t.onPrimary);
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    Ui.px(c, 22), Ui.px(c, 22));
+            dlp.rightMargin = Ui.px(c, 12);
+            row.addView(dot, dlp);
+        }
+
         HomePage.CoverThumb thumb = new HomePage.CoverThumb(c, s);
         row.addView(thumb, new LinearLayout.LayoutParams(Ui.px(c, 46), Ui.px(c, 46)));
 
@@ -1037,20 +1134,114 @@ public class LibraryPage {
 
         row.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
+                if (hostSelecting) {
+                    // 多选模式下点击 = 勾选/取消，不播放
+                    Ui.hapticLight(v);
+                    hostToggle(s);
+                    return;
+                }
                 Ui.hapticLight(v);
                 if (onPlay != null) onPlay.run();
             }
         });
-        // 长按 → 添加到歌单
+        // 长按：多选模式下是取消勾选，否则进入多选。
+        // 之前这里是弹单首菜单 —— 但「最近」和「收藏」里想批量加歌时，
+        // 一首一首长按太慢，跟「歌曲」分段的多选体验也不一致。
         row.setOnLongClickListener(new View.OnLongClickListener() {
             @Override public boolean onLongClick(View v) {
                 Ui.hapticStrong(v);
-                askAddToPlaylist(s);
+                if (hostSelecting) hostToggle(s);
+                else hostEnterSelection(s);
                 return true;
             }
         });
         Ui.pressable(row);
         return row;
+    }
+
+    // ── 历史 / 收藏的多选实现 ──────────────────────────────────────────────
+
+    private void hostEnterSelection(Song first) {
+        hostSelecting = true;
+        hostSelected.clear();
+        // 记下当前列表，加歌单时按它取顺序 —— 用 Song 对象本身也行，
+        // 但按 id 去重更稳（在线歌的 id 是算出来的，可能重复）
+        hostItems = mode == MODE_FAVORITES ? Favorites.items() : History.items();
+        if (first != null) hostSelected.add(first.id);
+        rebuildHostList();
+        showSelectionBar(true, hostSelected.size());
+    }
+
+    private void hostToggle(Song s) {
+        if (s == null) return;
+        if (hostSelected.contains(s.id)) hostSelected.remove(s.id);
+        else hostSelected.add(s.id);
+        if (hostSelected.isEmpty()) { hostExitSelection(); return; }
+        rebuildHostList();
+        showSelectionBar(true, hostSelected.size());
+    }
+
+    private void hostToggleAll() {
+        if (hostSelected.size() >= hostItems.size()) hostSelected.clear();
+        else for (Song s : hostItems) hostSelected.add(s.id);
+        if (hostSelected.isEmpty()) { hostExitSelection(); return; }
+        rebuildHostList();
+        showSelectionBar(true, hostSelected.size());
+    }
+
+    /** 选的歌，按列表原顺序返回 */
+    private List<Song> hostPicked() {
+        List<Song> out = new ArrayList<>();
+        for (Song s : hostItems) if (hostSelected.contains(s.id)) out.add(s);
+        return out;
+    }
+
+    private void hostAddToPlaylist() {
+        final List<Song> picked = hostPicked();
+        if (picked.isEmpty()) {
+            Toast.makeText(act, "还没选歌", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Playlist.showAddDialogFor(act, picked, new Runnable() {
+            @Override public void run() { hostExitSelection(); }
+        });
+    }
+
+    public void hostExitSelection() {
+        hostSelecting = false;
+        hostSelected.clear();
+        rebuildHostList();
+        showSelectionBar(false, 0);
+    }
+
+    /** 重建历史或收藏列表（切换勾选后要刷新选中态） */
+    private void rebuildHostList() {
+        if (mode == MODE_FAVORITES) buildFavorites();
+        else if (mode == MODE_HISTORY) buildHistory();
+    }
+
+    /** 左侧的勾选圈 */
+    private static class CheckDot extends View {
+        private final boolean on;
+        private final int fill, tick;
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final RectF box = new RectF();
+        CheckDot(Context c, boolean on, int fill, int tick) {
+            super(c); this.on = on; this.fill = fill; this.tick = tick;
+        }
+        @Override protected void onDraw(Canvas cv) {
+            float w = getWidth(), h = getHeight(), r = Math.min(w, h) / 2f;
+            p.reset(); p.setStyle(Paint.Style.FILL);
+            p.setColor(on ? fill : Hct.withAlpha(fill, 0.18f));
+            cv.drawCircle(w / 2f, h / 2f, r, p);
+            if (on) {
+                Icons.draw(cv, "check", boxOn(w, h, r * 0.62f), tick, 1f, p);
+            }
+        }
+        private RectF boxOn(float w, float h, float rad) {
+            box.set(w / 2f - rad, h / 2f - rad, w / 2f + rad, h / 2f + rad);
+            return box;
+        }
     }
 
     /**

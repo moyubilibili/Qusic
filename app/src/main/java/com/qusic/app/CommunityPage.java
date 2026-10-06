@@ -27,6 +27,24 @@ public class CommunityPage {
     private TextView whoLabel, statusLabel, authBtn, authHint;
     private LinearLayout authCard;
 
+    /** 板块：0 = 歌单分享，1 = 论坛 */
+    private int board = Community.BOARD_PLAYLIST;
+    /** 当前过滤的标签，空 = 不过滤 */
+    private String tagFilter = "";
+    private LibraryPage.SegmentedBar boardBar;
+    private TextView postBtn;
+    /**
+     * 一次性标志：程序性地切板块时不要把标签过滤清掉。
+     *
+     * <p>用户手动切板块 → 清标签（合理，标签只属于论坛）；
+     * 但「点标签跳过来」也会触发板块切换，那次**必须保留**标签，
+     * 否则刚点的话题立刻被清空，看起来就是「点了没反应」。
+     * 用标志而不是判断调用来源，是因为 {@code select(1, true)} 的
+     * onChange 是动画结束后异步触发的，那时已经分不清是谁发起的了。
+     */
+    private boolean keepTagOnBoardChange;
+    /** 当前标签过滤条（显示「#xxx  ×」） */
+    private TextView tagBar;
     private String sort = "new";
     private String query = "";
     /** 0=列表，否则是正在看的帖子 id */
@@ -114,10 +132,66 @@ public class CommunityPage {
         head.addView(seg, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, Ui.px(c, 42)));
 
+        // 板块切换。放在最上面一行 —— 先选「哪个板块」，再选「怎么排」，
+        // 顺序反过来的话用户会以为排序只对当前板块生效。
+        boardBar = new LibraryPage.SegmentedBar(c, new String[]{"歌单分享", "论坛"});
+        boardBar.setOnChange(new LibraryPage.SegmentedBar.OnChange() {
+            @Override public void onChange(int i) {
+                board = i == 0 ? Community.BOARD_PLAYLIST : Community.BOARD_FORUM;
+                if (keepTagOnBoardChange) {
+                    keepTagOnBoardChange = false;   // 消费掉，只豁免这一次
+                } else {
+                    tagFilter = "";                 // 用户手动切换 → 清标签
+                }
+                openId = 0;
+                if (postBtn != null) {
+                    postBtn.setVisibility(board == Community.BOARD_FORUM
+                            ? View.VISIBLE : View.GONE);
+                }
+                // 「热门」对论坛意义不大，两个板块的排序语义也不同，
+                // 切过去时统一回到最新，避免用户困惑
+                sort = "new";
+                load();
+            }
+        });
+        // 板块切换 + 发帖按钮同一行。论坛板块才显示发帖 ——
+        // 歌单分享的入口在曲库那边（长按歌单 → 分享），不放这里避免两个入口打架
+        LinearLayout boardRow = Ui.row(c);
+        boardRow.setPadding(0, 0, 0, Ui.px(c, 8));
+        boardRow.addView(boardBar, new LinearLayout.LayoutParams(
+                0, Ui.px(c, 42), 1f));
+
+        postBtn = new TextView(c);
+        postBtn.setText("发帖");
+        postBtn.setTextSize(13);
+        postBtn.setTypeface(Ui.tfBold());
+        postBtn.setGravity(Gravity.CENTER);
+        postBtn.setTextColor(t.onPrimary);
+        android.graphics.drawable.GradientDrawable pb =
+                new android.graphics.drawable.GradientDrawable();
+        pb.setColor(t.primary);
+        pb.setCornerRadius(Ui.px(c, 21));
+        postBtn.setBackground(pb);
+        postBtn.setPadding(Ui.px(c, 16), 0, Ui.px(c, 16), 0);
+        postBtn.setVisibility(View.GONE);
+        postBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Ui.hapticLight(v);
+                new ForumComposer(act).show(new ForumComposer.OnPosted() {
+                    @Override public void posted(long id) { openId = 0; load(); }
+                });
+            }
+        });
+        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, Ui.px(c, 42));
+        plp.leftMargin = Ui.px(c, 8);
+        boardRow.addView(postBtn, plp);
+        head.addView(boardRow);
+
         // 搜索
         LinearLayout searchBox = Ui.row(c);
         searchBox.setPadding(0, Ui.px(c, 10), 0, Ui.px(c, 8));
-        MdField sf = new MdField(c, "搜索歌单标题");
+        MdField sf = new MdField(c, "搜索标题或正文");
         sf.setTextSize(14);
         sf.setOnSubmit(new Runnable() {
             @Override public void run() {
@@ -129,6 +203,28 @@ public class CommunityPage {
         searchBox.addView(sf, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         head.addView(searchBox);
+
+        // 标签过滤条。只在有标签时出现，带一个 × 用来清掉 ——
+        // 之前点了标签就出不来了，只能切一下板块才能回到全部列表，
+        // 而切板块又会清标签，等于没有「清除」这个动作。
+        tagBar = new TextView(c);
+        tagBar.setTextSize(12.5f);
+        tagBar.setTypeface(Ui.tfMed());
+        tagBar.setPadding(Ui.px(c, 12), Ui.px(c, 7), Ui.px(c, 12), Ui.px(c, 7));
+        GradientDrawable tg = new GradientDrawable();
+        tg.setColor(Hct.withAlpha(t.primary, 0.14f));
+        tg.setCornerRadius(Ui.px(c, 15));
+        tagBar.setBackground(tg);
+        tagBar.setTextColor(t.primary);
+        tagBar.setVisibility(View.GONE);
+        tagBar.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Ui.hapticLight(v);
+                tagFilter = "";
+                load();
+            }
+        });
+        head.addView(tagBar);
 
         statusLabel = new TextView(c);
         statusLabel.setTextSize(12);
@@ -211,19 +307,53 @@ public class CommunityPage {
     public void load() {
         if (loading) return;
         loading = true;
+        if (tagBar != null) {
+            if (tagFilter.length() > 0) {
+                tagBar.setText("#" + tagFilter + "   ✕ 点这里清除");
+                tagBar.setVisibility(View.VISIBLE);
+            } else {
+                tagBar.setVisibility(View.GONE);
+            }
+        }
         statusLabel.setText("加载中…");
-        Community.list(sort, 1, query, new Community.Callback() {
+        Community.listBoard(board, sort, 1, query, tagFilter, new Community.Callback() {
             @Override public void onResult(Object data, String error) {
                 loading = false;
                 if (error != null) { statusLabel.setText(error); return; }
                 @SuppressWarnings("unchecked")
                 List<Community.Post> items = (List<Community.Post>) data;
-                statusLabel.setText(items.isEmpty()
-                        ? (query.length() > 0 ? "没搜到相关歌单" : "还没有人分享，来做第一个吧")
-                        : items.size() + " 个歌单");
+                String what = board == Community.BOARD_FORUM ? "帖子" : "歌单";
+                if (tagFilter.length() > 0) {
+                    statusLabel.setText("#" + tagFilter + " · " + items.size() + " 条");
+                } else if (items.isEmpty()) {
+                    statusLabel.setText(query.length() > 0
+                            ? "没搜到相关" + what
+                            : (board == Community.BOARD_FORUM
+                                    ? "论坛还没人发言，来说点什么吧"
+                                    : "还没有人分享，来做第一个吧"));
+                } else {
+                    statusLabel.setText(items.size() + " 条" + what);
+                }
                 buildList(items);
             }
         });
+    }
+
+    /**
+     * 点标签后跳到这里。
+     *
+     * <p>会自动切到「论坛」板块 —— 标签只用在论坛帖上，
+     * 如果人还在歌单板块，过滤完会是一片空白，看起来像坏了。
+     */
+    public void setTagAndLoad(String tag) {
+        tagFilter = tag == null ? "" : tag;
+        openId = 0;
+        query = "";
+        board = Community.BOARD_FORUM;
+        keepTagOnBoardChange = true;      // 板块切换的 onChange 会消费掉它
+        if (boardBar != null) boardBar.select(1, true);
+        if (postBtn != null) postBtn.setVisibility(View.VISIBLE);
+        load();
     }
 
     private void buildList(List<Community.Post> items) {

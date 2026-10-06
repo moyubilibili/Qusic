@@ -89,15 +89,38 @@ public class PlayerService extends Service {
     public static boolean sPlaying;
     public static long sPosition, sDuration;
 
+    // ── 累计收听时长 ──────────────────────────────────────────────────────
+    // 每秒打一次点，只在真正播放时累加。暂停/缓冲/播完都不算。
+    private final android.os.Handler statHandler =
+            new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean wasPlaying = false;
+    private final Runnable statTick = new Runnable() {
+        @Override public void run() {
+            boolean nowPlaying = isPlaying();
+            if (nowPlaying) {
+                ListenStats.tick(PlayerService.this);
+                // 从「没在播」变成「在播」= 一次新的收听
+                if (!wasPlaying) ListenStats.countSession(PlayerService.this);
+            } else if (wasPlaying) {
+                // 刚停下来：落盘，别让它一直挂在内存里
+                ListenStats.flush(PlayerService.this);
+            }
+            wasPlaying = nowPlaying;
+            statHandler.postDelayed(this, 1000);
+        }
+    };
+
     @Override public void onCreate() {
         super.onCreate();
         sInst = this;
         prefs = getSharedPreferences("qusic_state", Context.MODE_PRIVATE);
         repeat = prefs.getInt("repeat", REPEAT_ALL);
         shuffle = prefs.getInt("shuffle", SHUFFLE_OFF);
+        ListenStats.init(this);
         createChannel();
         initMediaSession();
         mp = new MediaPlayer();
+        statHandler.postDelayed(statTick, 1000);
         mp.setAudioAttributes(new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
@@ -234,6 +257,9 @@ public class PlayerService extends Service {
         if (i >= order.size()) i = order.size() - 1;
         index = i;
         Song s = order.get(i);
+        // 换歌（含从头重播同一首）才算「播过一首」；
+        // 暂停后恢复不算，所以放在 playIndex 而不是 play()
+        if (sCurrent == null || sCurrent.id != s.id) ListenStats.countSong(this);
         sCurrent = s;
         sDuration = s.durationMs;
         sPosition = 0;
@@ -326,6 +352,7 @@ public class PlayerService extends Service {
             if (mp.isPlaying()) { mp.pause(); sPlaying = false; userPaused = true; }
             else { mp.start(); sPlaying = true; userPaused = false; tick(); }
         } catch (Throwable ignored) {}
+        ListenStats.flush(this);
         notifyPlay();
         pushNotification();
     }
@@ -337,6 +364,7 @@ public class PlayerService extends Service {
 
     public void pause() {
         try { if (mp.isPlaying()) { mp.pause(); sPlaying = false; userPaused = true; } } catch (Throwable ignored) {}
+        ListenStats.flush(this);      // 暂停时落盘，避免进程被杀丢数据
         notifyPlay(); pushNotification();
     }
 
@@ -646,6 +674,8 @@ public class PlayerService extends Service {
     }
 
     @Override public void onDestroy() {
+        statHandler.removeCallbacks(statTick);
+        ListenStats.flush(this);
         h.removeCallbacksAndMessages(null);
         try { if (mediaSession != null) { mediaSession.release(); mediaSession = null; } }
         catch (Throwable ignored) {}

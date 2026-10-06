@@ -147,6 +147,7 @@ public class SongListView extends View implements PlayerService.Listener {
 
     // ── 多选 API ───────────────────────────────────────────────────────────
     public boolean isSelecting() { return selecting; }
+
     public int selectedCount() { return selected.size(); }
 
     /** 进入多选并选中这一首 */

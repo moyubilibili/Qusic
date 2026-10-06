@@ -48,6 +48,7 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     /** 从 .Qusic 导入歌单 */
     public static final int REQ_IMPORT_PLAYLIST = 3002;
     public static final int REQ_IMPORT_TREE = 2002;      // 选文件夹（整个目录导入）
+    public static final int REQ_PICK_IMAGE = 6001;       // 论坛发帖选图
     public static final int REQ_PICK_AUDIO_PERM = 4001;
     /** 待导出的歌单（SAF 异步返回，得先记住内容） */
     private long pendingExportId;
@@ -94,6 +95,10 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         History.init(this);   // 恢复播放历史
         Playlist.init(this);  // 恢复歌单
         Community.init(this); // 社区登录状态
+        ListenStats.init(this); // 累计收听时长（关于页要显示）
+        Favorites.init(this);   // 收藏
+        // 拉一次真实角色 —— 老会话里没存 role，不拉的话管理入口永远不显示
+        Community.syncMe(this);
         Theme.setListener(new Theme.Listener() {
             @Override public void onThemeChanged(Tokens t) { recreate(); }
         });
@@ -202,7 +207,8 @@ public class MainActivity extends Activity implements PlayerService.Listener {
                 switchTab(index, false);
             }
         });
-        // MD3 标准：整条贴底、通栏，不留外边距
+        // 底栏布局：标准模式通栏贴底；液态玻璃模式是悬浮胶囊，四周留边距。
+        // 高度这里先按标准算，玻璃模式下 LiquidNavBar.onMeasure 会自己改成 64dp。
         FrameLayout.LayoutParams navLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, navH + gestureInset);
         navLp.gravity = Gravity.BOTTOM;
@@ -241,6 +247,26 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     }
 
     private int navBottomPad, navHeight, navGestureInset = -1;
+    private AdminPage adminPage;
+
+    // ── 论坛选图 ──────────────────────────────────────────────────────────
+    public interface ImagePick { void picked(android.graphics.Bitmap bm); }
+    private ImagePick imagePickCb;
+
+    /** 打开系统相册选一张图。选完回调解码好的 Bitmap（还没压缩） */
+    public void pickImage(ImagePick cb) {
+        imagePickCb = cb;
+        android.content.Intent i = new android.content.Intent(
+                android.content.Intent.ACTION_PICK,
+                android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+        i.setType("image/*");
+        try {
+            startActivityForResult(i, REQ_PICK_IMAGE);
+        } catch (Throwable t) {
+            Toast.makeText(this, "打不开相册", Toast.LENGTH_SHORT).show();
+        }
+    }
+    private boolean adminOpen;
 
     /**
      * 流体云可见时给内容页顶部让位。
@@ -596,6 +622,98 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     private boolean postOpen;
 
     /** 打开社区帖子详情 */
+    /**
+     * 打开管理页。
+     *
+     * <p>这里**不判断权限** —— 判断在服务端（每个 admin_* 都查 role）。
+     * 客户端只在「关于」页决定要不要显示入口，那是体验，不是安全边界。
+     */
+    /**
+     * 解码相册返回的图。
+     *
+     * <p>用 {@code inSampleSize} 先粗降采样再交给压缩 —— 直接解码一张
+     * 4000×3000 的照片要 48MB 内存，中端机直接就 OOM 了。
+     */
+    private void handlePickImage(android.net.Uri uri) {
+        final ImagePick cb = imagePickCb;
+        imagePickCb = null;
+        if (uri == null || cb == null) return;
+        try {
+            android.graphics.BitmapFactory.Options o = new android.graphics.BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            java.io.InputStream in1 = getContentResolver().openInputStream(uri);
+            android.graphics.BitmapFactory.decodeStream(in1, null, o);
+            if (in1 != null) in1.close();
+
+            int sample = 1;
+            int longSide = Math.max(o.outWidth, o.outHeight);
+            while (longSide / sample > 1600) sample *= 2;   // 目标 1600 以内
+
+            android.graphics.BitmapFactory.Options o2 = new android.graphics.BitmapFactory.Options();
+            o2.inSampleSize = sample;
+            java.io.InputStream in2 = getContentResolver().openInputStream(uri);
+            android.graphics.Bitmap bm = android.graphics.BitmapFactory.decodeStream(in2, null, o2);
+            if (in2 != null) in2.close();
+
+            if (bm == null) {
+                Toast.makeText(this, "这张图读不出来", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            cb.picked(bm);
+        } catch (Throwable t) {
+            Toast.makeText(this, "读取图片失败", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    /**
+     * 点标签 → 回社区页并只看这个话题。
+     *
+     * <p>如果当前在帖子详情里，先把它关掉 —— 否则标签页会被详情页盖住，
+     * 用户会以为「点了没反应」。
+     */
+    public void openTag(String tag) {
+        if (postOpen) closePostDetail();
+        if (adminOpen) closeAdmin();
+        if (currentTab != 3) switchTab(3, false);
+        if (communityPage != null) communityPage.setTagAndLoad(tag);
+    }
+
+    public void openAdmin() {
+        if (adminPage == null) adminPage = new AdminPage(this);
+        if (!adminOpen) {
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            root.addView(adminPage.view(), lp);
+            adminOpen = true;
+        }
+        root.bringChildToFront(adminPage.view());
+        adminPage.view().setTranslationZ(Ui.px(this, 12));
+        View v = adminPage.view();
+        v.animate().cancel();
+        v.setTranslationX(getResources().getDisplayMetrics().widthPixels * 0.22f);
+        v.setAlpha(0f);
+        v.animate().translationX(0f).alpha(1f)
+                .setDuration(Theme.dur(260))
+                .setInterpolator(Theme.EMPHASIZED).start();
+        Ui.hapticLight(v);
+    }
+
+    public void closeAdmin() {
+        if (!adminOpen) return;
+        adminOpen = false;
+        final View v = adminPage.view();
+        v.animate().cancel();
+        v.animate().translationX(getResources().getDisplayMetrics().widthPixels * 0.22f)
+                .alpha(0f).setDuration(Theme.dur(200))
+                .withEndAction(new Runnable() {
+                    @Override public void run() {
+                        root.removeView(v);
+                        v.setAlpha(1f);
+                        v.setTranslationX(0f);
+                    }
+                }).start();
+    }
+
     public void openPostDetail(long id) {
         postDetail.bind(id);
         if (!postOpen) {
@@ -765,6 +883,10 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         super.onActivityResult(req, result, data);
 
         // ── 悬浮窗授权回来 ──
+        if (req == REQ_PICK_IMAGE) {
+            handlePickImage(result == RESULT_OK && data != null ? data.getData() : null);
+            return;
+        }
         if (req == REQ_IMPORT_TREE) {
             if (result == RESULT_OK && data != null && data.getData() != null) {
                 importFolder(data.getData());
@@ -898,9 +1020,12 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     @Override public void onBackPressed() {
         // 多选模式：返回键先退出多选，而不是切页
         if (currentTab == 1 && libraryPage != null && libraryPage.isSelecting()) {
-            libraryPage.exitSelection();
+            // 历史/收藏的多选也在同一个返回键里退出
+            libraryPage.exitAnySelection();
             return;
         }
+        // 管理页（最上层）
+        if (adminOpen) { closeAdmin(); return; }
         // 歌单详情页优先关闭
         if (detailOpen) { closePlaylistDetail(); return; }
         // 社区帖子详情（二级页面）优先关闭

@@ -8,6 +8,7 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.util.List;
 
@@ -217,15 +218,23 @@ public class PostDetailPage {
         row.setPadding(0, Ui.px(c, 10), 0, Ui.px(c, 12));
         row.addView(authorView(c, t, post.author, post.role));
         TextView meta = new TextView(c);
-        meta.setText(" 分享 · " + post.count + " 首 · ♥ " + post.likes
-                + " · 浏览 " + post.views);
+        boolean forum = post.board == Community.BOARD_FORUM;
+        meta.setText(forum
+                ? " 发帖 · ♥ " + post.likes + " · 浏览 " + post.views
+                : " 分享 · " + post.count + " 首 · ♥ " + post.likes
+                        + " · 浏览 " + post.views);
         meta.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.8f));
         meta.setTextSize(12);
         row.addView(meta);
         body.addView(row);
 
-        // 推荐语
-        if (post.note.length() > 0) {
+        // 论坛：正文 + 标签 + 图片 + 引用的歌
+        if (forum) {
+            renderForumBody(c, t);
+        }
+
+        // 推荐语（只有歌单帖有）
+        if (!forum && post.note.length() > 0) {
             TextView nt = new TextView(c);
             nt.setText(post.note);
             nt.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.95f));
@@ -244,6 +253,8 @@ public class PostDetailPage {
         acts.setPadding(0, Ui.px(c, 16), 0, Ui.px(c, 4));
 
         TextView imp = new TextView(c);
+        // 论坛帖没有 payload，导入无从谈起
+        imp.setVisibility(forum ? View.GONE : View.VISIBLE);
         imp.setText("导入到我的歌单");
         imp.setTextSize(14);
         imp.setTypeface(Ui.tfBold());
@@ -260,6 +271,38 @@ public class PostDetailPage {
         });
         acts.addView(imp, new LinearLayout.LayoutParams(0,
                 LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        // 删除权限：自己的帖可以删；管理员可以删任何帖。
+        // 之前 App 里**根本没有这个入口** —— Community.delete 写了却没人调，
+        // 发错了只能去管理页翻列表，很别扭。
+        final boolean mine = post.author != null
+                && post.author.equals(Community.userName(act));
+        final boolean admin = Community.isAdmin(act);
+        if (mine || admin) {
+            TextView del = new TextView(c);
+            del.setText(admin && !mine ? "下架" : "删除");
+            del.setTextSize(14);
+            del.setTypeface(Ui.tfMed());
+            del.setTextColor(t.error);
+            del.setGravity(Gravity.CENTER);
+            del.setPadding(Ui.px(c, 18), Ui.px(c, 13), Ui.px(c, 18), Ui.px(c, 13));
+            GradientDrawable db = new GradientDrawable();
+            db.setColor(Hct.withAlpha(t.error, 0.12f));
+            db.setCornerRadius(Ui.px(c, 24));
+            del.setBackground(db);
+            Ui.pressable(del);
+            del.setOnClickListener(new View.OnClickListener() {
+                @Override public void onClick(View v) {
+                    Ui.hapticLight(v);
+                    confirmDelete(mine && !admin);
+                }
+            });
+            LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            dlp.leftMargin = Ui.px(c, 8);
+            acts.addView(del, dlp);
+        }
 
         TextView lk = new TextView(c);
         lk.setText("♥ 赞");
@@ -302,6 +345,153 @@ public class PostDetailPage {
         ct.setPadding(0, Ui.px(c, 20), 0, Ui.px(c, 8));
         body.addView(ct);
         body.addView(commentBox);
+    }
+
+    /**
+     * 论坛正文区：正文 → 标签 → 图片 → 引用的歌。
+     *
+     * <p>顺序是刻意的：先读文字，再看图，最后才是歌。把歌放最上面会喧宾夺主，
+     * 而论坛的核心是「话」。
+     */
+    private void renderForumBody(Context c, Tokens t) {
+        // 正文
+        TextView bd = new TextView(c);
+        bd.setText(post.body);
+        bd.setTextColor(t.onSurface);
+        bd.setTextSize(15);
+        bd.setLineSpacing(Ui.px(c, 7), 1f);
+        bd.setPadding(0, Ui.px(c, 4), 0, Ui.px(c, 12));
+        bd.setTextIsSelectable(true);
+        body.addView(bd);
+
+        // 标签：可点，点了回列表按这个标签过滤
+        if (!post.tags.isEmpty()) {
+            LinearLayout tags = Ui.row(c);
+            tags.setPadding(0, 0, 0, Ui.px(c, 12));
+            int n = 0;
+            for (final String tag : post.tags) {
+                if (n >= 8) break;
+                TextView tv = new TextView(c);
+                tv.setText("#" + tag);
+                tv.setTextSize(12.5f);
+                tv.setTypeface(Ui.tfMed());
+                tv.setTextColor(t.primary);
+                tv.setPadding(Ui.px(c, 10), Ui.px(c, 6), Ui.px(c, 10), Ui.px(c, 6));
+                GradientDrawable g = new GradientDrawable();
+                g.setColor(Hct.withAlpha(t.primary, 0.12f));
+                g.setCornerRadius(Ui.px(c, 13));
+                tv.setBackground(g);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT);
+                lp.rightMargin = Ui.px(c, 6);
+                tv.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View v) {
+                        Ui.hapticLight(v);
+                        if (act != null) act.openTag(tag);
+                    }
+                });
+                Ui.pressable(tv);
+                tags.addView(tv, lp);
+                n++;
+            }
+            body.addView(tags);
+        }
+
+        // 图片
+        for (Community.ImageRef im : post.images) {
+            NetImage iv = new NetImage(c, im.url, im.w, im.h);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.bottomMargin = Ui.px(c, 10);
+            body.addView(iv, lp);
+        }
+
+        // 引用的歌
+        if (!post.songs.isEmpty()) {
+            TextView h = new TextView(c);
+            h.setText(post.songs.size() == 1 ? "引用了这首歌" : "引用了这些歌");
+            h.setTextSize(12);
+            h.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.9f));
+            h.setPadding(0, Ui.px(c, 4), 0, Ui.px(c, 6));
+            body.addView(h);
+            for (Community.SongRef r : post.songs) body.addView(songCard(c, t, r));
+        }
+    }
+
+    /**
+     * 引用的歌曲卡片。点一下**重新解析直链**再播 ——
+     * 帖子里存的是元数据，音源的直链带时效签名，存下来早就失效了。
+     */
+    private View songCard(Context c, Tokens t, final Community.SongRef r) {
+        LinearLayout card = Ui.row(c);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(Ui.px(c, 12), Ui.px(c, 10), Ui.px(c, 12), Ui.px(c, 10));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(t.surfaceContainerHigh);
+        bg.setCornerRadius(Ui.px(c, 14));
+        card.setBackground(bg);
+        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        clp.bottomMargin = Ui.px(c, 6);
+        card.setLayoutParams(clp);
+
+        HomePage.IconView ic = new HomePage.IconView(c, "play", t.primary);
+        card.addView(ic, new LinearLayout.LayoutParams(Ui.px(c, 20), Ui.px(c, 20)));
+
+        LinearLayout col = Ui.column(c);
+        col.setPadding(Ui.px(c, 12), 0, 0, 0);
+        TextView ti = new TextView(c);
+        ti.setText(r.title);
+        ti.setTextSize(14);
+        ti.setTypeface(Ui.tfMed());
+        ti.setTextColor(t.onSurface);
+        ti.setMaxLines(1);
+        ti.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        col.addView(ti);
+        TextView ar = new TextView(c);
+        ar.setText((r.artist.length() == 0 ? "未知歌手" : r.artist)
+                + (r.duration > 0 ? " · " + Ui.mmss(r.duration) : ""));
+        ar.setTextSize(11.5f);
+        ar.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.85f));
+        ar.setMaxLines(1);
+        col.addView(ar);
+        card.addView(col, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        card.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Ui.hapticLight(v);
+                playRef(r);
+            }
+        });
+        Ui.pressable(card);
+        return card;
+    }
+
+    /** 把帖子里的歌曲引用还原成 Song 并播放 */
+    private void playRef(Community.SongRef r) {
+        Song s = new Song();
+        s.title = r.title;
+        s.artist = r.artist;
+        s.album = r.album;
+        s.durationMs = r.duration;
+        s.coverUrl = r.cover;
+        s.source = r.source;
+        s.online = true;
+        s.neteaseId = r.sid;
+        s.uri = "ref:" + r.source + ":" + r.sid;
+        s.path = s.uri;
+        s.id = Math.abs(s.uri.hashCode());
+        PlayerService ps = PlayerService.instance();
+        if (ps == null) {
+            Toast.makeText(act, "播放器还没准备好", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        ps.playSong(s);
+        Toast.makeText(act, "正在解析 " + r.title + "…", Toast.LENGTH_SHORT).show();
     }
 
     private void renderComments(List<Community.Comment> cs) {
@@ -365,6 +555,46 @@ public class PostDetailPage {
     }
 
     // ── 动作 ────────────────────────────────────────────────────────────────
+    /** 删除确认。管理员删别人的帖子要说清楚「这是别人的」 */
+    private void confirmDelete(final boolean ownPost) {
+        new MdDialog.Builder(act)
+                .title(ownPost ? "删除这条？" : "下架这条？")
+                .message(ownPost
+                        ? "删掉之后无法恢复。"
+                        : "这是「" + post.author + "」发的，不是你自己的。\n"
+                          + "下架后不会出现在列表里，数据保留，可以恢复。")
+                .negative("取消", null)
+                .positive(ownPost ? "删除" : "下架", new MdDialog.OnClick() {
+                    @Override public void onClick() {
+                        if (ownPost) {
+                            Community.delete(act, postId, new Community.Callback() {
+                                @Override public void onResult(Object data, String error) {
+                                    afterDelete(error);
+                                }
+                            });
+                        } else {
+                            Community.adminDelPlaylist(act, postId, new Community.Callback() {
+                                @Override public void onResult(Object data, String error) {
+                                    afterDelete(error);
+                                }
+                            });
+                        }
+                    }
+                })
+                .show();
+    }
+
+    private void afterDelete(final String error) {
+        act.runOnUiThread(new Runnable() { @Override public void run() {
+            if (error != null) {
+                Toast.makeText(act, error, Toast.LENGTH_LONG).show();
+                return;
+            }
+            Toast.makeText(act, "已删除", Toast.LENGTH_SHORT).show();
+            close();
+        }});
+    }
+
     private void doImport() {
         if (post == null) return;
         if (post.payload.length() == 0) { toast("这个歌单内容为空"); return; }

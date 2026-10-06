@@ -111,6 +111,15 @@ public class AboutPage {
 
         opts.addView(settingRow(c, t, "主题配色", seedName() + " · 点按更换", "palette",
                 new Runnable() { @Override public void run() { showSeedPicker(); } }));
+        // 管理入口：只有 role >= 1 才显示。
+        // 这只是「入口的显隐」，真正的权限在服务端每个 admin_* 里各查一次。
+        if (Community.isAdmin(act)) {
+            opts.addView(divider(c, t));
+            opts.addView(settingRow(c, t, "社区管理",
+                    "封禁 / 下架 / 重置密码", "lock", new Runnable() {
+                        @Override public void run() { act.openAdmin(); }
+                    }));
+        }
         opts.addView(divider(c, t));
         opts.addView(settingRow(c, t, "深色模式", Theme.isDark() ? "已开启" : "已关闭",
                 "moon", new Runnable() {
@@ -562,6 +571,21 @@ public class AboutPage {
             sb.append('\n');
             sb.append("总时长 ").append(Ui.duration(total));
             sb.append("    无损 ").append(flac).append(" 首");
+            sb.append('\n');
+            // 「曲库总时长」= 你拥有多少音乐；「累计收听」= 你实际听了多久。
+            // 同一个歌单听十遍，前者不变，后者会涨。
+            sb.append("累计收听 ").append(ListenStats.human(ListenStats.totalMs()));
+            long today = ListenStats.todayMs();
+            if (today > 0) {
+                sb.append("    今日 ").append(ListenStats.human(today));
+            }
+            int played = ListenStats.songsPlayed();
+            if (played > 0) {
+                sb.append('\n');
+                sb.append("播放过 ").append(played).append(" 首");
+                int sess = ListenStats.sessions();
+                if (sess > 0) sb.append("    收听 ").append(sess).append(" 次");
+            }
         }
         sb.append('\n');
         sb.append(Theme.isDark() ? "深色主题" : "浅色主题");

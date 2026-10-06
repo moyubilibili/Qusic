@@ -229,10 +229,20 @@ public final class Ui {
         return String.format(java.util.Locale.US, "%d:%02d", s / 60, s % 60);
     }
 
+    /**
+     * 把时长说成人话。
+     *
+     * <p>修掉了两个边界：
+     * 不足一分钟原来显示「0 分钟」（像坏了），现在说「不到 1 分钟」；
+     * 整小时原来显示「1 小时 0 分」，现在直接「1 小时」。
+     */
     public static String duration(long ms) {
+        if (ms <= 0) return "0 分钟";
         long m = ms / 60000;
+        if (m < 1) return "不到 1 分钟";
         if (m < 60) return m + " 分钟";
-        return (m / 60) + " 小时 " + (m % 60) + " 分";
+        long h = m / 60, mm = m % 60;
+        return mm == 0 ? (h + " 小时") : (h + " 小时 " + mm + " 分");
     }
 
     public static String fileSize(long b) {

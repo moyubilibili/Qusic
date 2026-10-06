@@ -18,6 +18,7 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.util.List;
 
@@ -289,7 +290,48 @@ public class HomePage {
                 if (ps != null) ps.playSong(s);
             }
         });
+
+        // 长按 → 菜单。之前这里只有点击，所以「最近导入」的歌没法加进歌单 ——
+        // 曲库的「最近」分段有长按，首页这块漏了，用起来就很割裂。
+        row.setOnLongClickListener(new View.OnLongClickListener() {
+            @Override public boolean onLongClick(View v) {
+                Ui.hapticStrong(v);
+                showSongMenu(s);
+                return true;
+            }
+        });
+        Ui.pressable(row);
         return row;
+    }
+
+    /** 长按歌曲弹出的菜单 */
+    private void showSongMenu(final Song s) {
+        final boolean fav = Favorites.has(s);
+        final String[] items = {
+                fav ? "取消收藏" : "收藏",
+                "添加到歌单",
+                "新建歌单并加入",
+        };
+        new MdDialog.Builder(act)
+                .title(s.title)
+                .message(s.subtitle())
+                .items(items, new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int which) {
+                        if (which == 0) {
+                            boolean now = Favorites.toggle(act, s);
+                            Toast.makeText(act, now ? "已收藏" : "已取消收藏",
+                                    Toast.LENGTH_SHORT).show();
+                            refresh();
+                        } else if (which == 1) {
+                            Playlist.showAddDialog(act, s, null);
+                        } else {
+                            Playlist.askNameAndCreateFor(act,
+                                    java.util.Collections.singletonList(s), null);
+                        }
+                    }
+                })
+                .negative("取消", null)
+                .show();
     }
 
     public void onShow() { if (hero != null) hero.refresh(); }

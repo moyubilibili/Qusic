@@ -29,6 +29,8 @@ public final class Community {
 
     /** 部署好的社区地址 */
     public static final String BASE = "https://qclear.xyz/community/index.php";
+    /** 管理端接口前缀，跟普通接口同一个入口 */
+    public static final String K_ROLE = "role";
 
     private static final String PREFS = "qusic_community";
     private static final String K_TOKEN = "token";
@@ -50,14 +52,33 @@ public final class Community {
     public static String userName(Context c) { init(c); return sPrefs.getString(K_NAME, ""); }
     public static boolean loggedIn(Context c) { return token(c).length() > 0; }
 
-    public static void saveLogin(Context c, String token, String name) {
+    /**
+     * 当前账号是不是管理员。
+     *
+     * <p>登录接口本来就返回 role，只是以前客户端把它丢了。
+     * 这里存下来，社区页据此决定要不要显示管理入口。
+     *
+     * <p><b>注意这是展示层的判断</b> —— 真正的权限在服务端每个
+     * admin_* 接口里各查一次，客户端改这个值也拿不到任何权限。
+     */
+    public static boolean isAdmin(Context c) {
         init(c);
-        sPrefs.edit().putString(K_TOKEN, token).putString(K_NAME, name).apply();
+        return sPrefs.getInt(K_ROLE, 0) >= 1;
+    }
+
+    public static void saveLogin(Context c, String token, String name) {
+        saveLogin(c, token, name, 0);
+    }
+
+    public static void saveLogin(Context c, String token, String name, int role) {
+        init(c);
+        sPrefs.edit().putString(K_TOKEN, token).putString(K_NAME, name)
+                .putInt(K_ROLE, role).apply();
     }
 
     public static void logout(Context c) {
         init(c);
-        sPrefs.edit().remove(K_TOKEN).remove(K_NAME).apply();
+        sPrefs.edit().remove(K_TOKEN).remove(K_NAME).remove(K_ROLE).apply();
     }
 
     // ── 回调 ────────────────────────────────────────────────────────────────
@@ -65,12 +86,65 @@ public final class Community {
     public interface Callback { void onResult(Object data, String error); }
 
     // ── 帖子模型 ────────────────────────────────────────────────────────────
+    /** 板块：0 = 歌单分享，1 = 论坛 */
+    public static final int BOARD_PLAYLIST = 0, BOARD_FORUM = 1;
+
+    /** 帖子/歌单里引用的歌曲 */
+    public static class SongRef {
+        public int source;
+        public long sid;
+        public String title = "", artist = "", album = "", cover = "";
+        public long duration;
+
+        public static SongRef of(Object o) {
+            SongRef r = new SongRef();
+            Object src = Json.path(o, "source");
+            r.source = src instanceof Number ? ((Number) src).intValue() : 0;
+            Object sid = Json.path(o, "sid");
+            r.sid = sid instanceof Number ? ((Number) sid).longValue() : 0;
+            r.title = nz(Json.str(o, "title"));
+            r.artist = nz(Json.str(o, "artist"));
+            r.album = nz(Json.str(o, "album"));
+            r.cover = nz(Json.str(o, "cover"));
+            Object d = Json.path(o, "duration");
+            r.duration = d instanceof Number ? ((Number) d).longValue() : 0;
+            return r;
+        }
+    }
+
+    /** 帖子里的图片 */
+    public static class ImageRef {
+        public String url = "";
+        public int w, h, bytes;
+
+        public static ImageRef of(Object o) {
+            ImageRef r = new ImageRef();
+            r.url = nz(Json.str(o, "url"));
+            Object w2 = Json.path(o, "w");
+            r.w = w2 instanceof Number ? ((Number) w2).intValue() : 0;
+            Object h2 = Json.path(o, "h");
+            r.h = h2 instanceof Number ? ((Number) h2).intValue() : 0;
+            Object b = Json.path(o, "bytes");
+            r.bytes = b instanceof Number ? ((Number) b).intValue() : 0;
+            return r;
+        }
+    }
+
     public static class Post {
         public long id;
         public String title = "", note = "", author = "", payload = "";
         public int count, likes, views;
         public int role;          // 1 = 开发者
         public long created;
+
+        // ── 论坛板块才有的字段 ──
+        /** 0 = 歌单分享，1 = 论坛 */
+        public int board;
+        /** 论坛正文（歌单帖为空） */
+        public String body = "";
+        public List<String> tags = new ArrayList<>();
+        public List<ImageRef> images = new ArrayList<>();
+        public List<SongRef> songs = new ArrayList<>();
 
         static Post of(Object o) {
             Post p = new Post();
@@ -84,6 +158,13 @@ public final class Community {
             p.views   = (int) Json.lng(o, "views");
             p.created = Json.lng(o, "created");
             p.role    = (int) Json.lng(o, "author_role");
+            p.board   = (int) Json.lng(o, "board");
+            p.body    = nz(Json.str(o, "body"));
+            for (Object t : Json.list(o, "tags")) {
+                if (t != null) p.tags.add(String.valueOf(t));
+            }
+            for (Object im : Json.list(o, "images")) p.images.add(ImageRef.of(im));
+            for (Object sg : Json.list(o, "songs"))  p.songs.add(SongRef.of(sg));
             return p;
         }
     }
@@ -181,7 +262,10 @@ public final class Community {
                     String tk = nz(Json.str(d, "token"));
                     String nm = nz(Json.str(d, "name"));
                     boolean vf = "true".equals(String.valueOf(Json.path(d, "verified")));
-                    saveLogin(ctx, tk, nm);
+                    int role = 0;
+                    try { role = Integer.parseInt(String.valueOf(Json.path(d, "role"))); }
+                    catch (Throwable ignored) {}
+                    saveLogin(ctx, tk, nm, role);
                     done(cb, vf ? "1" : "0", null);   // 返回验证状态
                 } catch (Throwable t) {
                     done(cb, null, friendly(t));
@@ -238,6 +322,175 @@ public final class Community {
                                 + (body.length() > 2 ? body.substring(1) : "\"x\":1}");
                     }
                     Reply r = call(BASE + "?a=" + action, b);
+                    if (r.error != null) { done(cb, null, r.error); return; }
+                    done(cb, Json.path(r.root, "data"), null);
+                } catch (Throwable t) {
+                    done(cb, null, friendly(t));
+                }
+            }
+        });
+    }
+
+    /**
+     * 同步当前用户的真实信息（尤其是 role）。
+     *
+     * <p>为什么需要这个：role 原本只在 login 时下发，于是
+     * 「加 role 字段之前就登录了」的老会话永远拿不到角色，管理入口根本不显示；
+     * 被提升 / 撤销管理员也得重新登录才生效。启动时拉一次就跟服务端对齐了。
+     *
+     * <p>失败时静默 —— 网络不好不该影响启动。
+     */
+    public static void syncMe(final Context ctx) {
+        if (!loggedIn(ctx)) return;
+        Library.pool().execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    Reply r = call(BASE + "?a=me&token=" + enc(token(ctx)), null);
+                    if (r.error != null) return;
+                    Object d = Json.path(r.root, "data");
+                    int role = 0;
+                    try { role = Integer.parseInt(String.valueOf(Json.path(d, "role"))); }
+                    catch (Throwable ignored) {}
+                    String nm = nz(Json.str(d, "name"));
+                    init(ctx);
+                    sPrefs.edit().putInt(K_ROLE, role)
+                            .putString(K_NAME, nm.length() == 0 ? userName(ctx) : nm).apply();
+                } catch (Throwable ignored) {}
+            }
+        });
+    }
+
+    // ══ 论坛 ════════════════════════════════════════════════════════════
+
+    /** 按板块取列表。tag 非空则只看这个标签下的 */
+    public static void listBoard(final int board, final String sort, final int page,
+                                 final String q, final String tag, final Callback cb) {
+        Library.pool().execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    StringBuilder u = new StringBuilder(BASE)
+                            .append("?a=list&board=").append(board)
+                            .append("&sort=").append(sort)
+                            .append("&page=").append(page);
+                    if (q != null && q.length() > 0) u.append("&q=").append(enc(q));
+                    if (tag != null && tag.length() > 0) u.append("&tag=").append(enc(tag));
+                    Reply r = call(u.toString(), null);
+                    if (r.error != null) { done(cb, null, r.error); return; }
+                    List<Post> out = new ArrayList<>();
+                    for (Object o : Json.list(r.root, "data", "items")) out.add(Post.of(o));
+                    done(cb, out, null);
+                } catch (Throwable t) {
+                    done(cb, null, friendly(t));
+                }
+            }
+        });
+    }
+
+    /** 热门标签 */
+    public static void tags(final Callback cb) {
+        Library.pool().execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    Reply r = call(BASE + "?a=tags&limit=30", null);
+                    if (r.error != null) { done(cb, null, r.error); return; }
+                    List<String[]> out = new ArrayList<>();
+                    for (Object o : Json.list(r.root, "data", "list")) {
+                        out.add(new String[]{ nz(Json.str(o, "name")),
+                                              String.valueOf(Json.lng(o, "count")) });
+                    }
+                    done(cb, out, null);
+                } catch (Throwable t) {
+                    done(cb, null, friendly(t));
+                }
+            }
+        });
+    }
+
+    /**
+     * 发论坛帖。
+     *
+     * @param images base64 数组（客户端已压缩过，服务端会再校验一次）
+     * @param songsJson 引用歌曲的 JSON 数组原文，形如 [{...}]
+     */
+    public static void postPublish(final Context ctx, final String title, final String body,
+                                   final String songsJson, final String imagesJson,
+                                   final Callback cb) {
+        String json = "{\"title\":" + Json.q(title)
+                + ",\"body\":" + Json.q(body)
+                + ",\"songs\":" + (songsJson == null ? "[]" : songsJson)
+                + ",\"images\":" + (imagesJson == null ? "[]" : imagesJson) + "}";
+        post(ctx, "post_publish", json, cb, true);
+    }
+
+    // ══ 管理端 ══════════════════════════════════════════════════════════
+    // 服务端每个 admin_* 都会再查一次权限（role >= 1），
+    // 所以这里不做客户端判断 —— 传了就传了，没权限会被 403 挡回来。
+
+    public static void adminStats(final Context ctx, final Callback cb) {
+        get(ctx, "admin_stats", "", cb);
+    }
+
+    public static void adminUsers(final Context ctx, final String q, final int offset,
+                                  final Callback cb) {
+        get(ctx, "admin_users", "&q=" + enc(q) + "&offset=" + offset + "&limit=50", cb);
+    }
+
+    public static void adminPlaylists(final Context ctx, final String q, final String sort,
+                                      final int offset, final Callback cb) {
+        get(ctx, "admin_playlists", "&q=" + enc(q) + "&sort=" + sort + "&offset=" + offset
+                + "&limit=50", cb);
+    }
+
+    public static void adminReports(final Context ctx, final Callback cb) {
+        get(ctx, "admin_reports", "", cb);
+    }
+
+    public static void adminAudit(final Context ctx, final Callback cb) {
+        get(ctx, "admin_audit", "", cb);
+    }
+
+    public static void adminComments(final Context ctx, final long pid, final Callback cb) {
+        get(ctx, "admin_comments", "&playlist_id=" + pid, cb);
+    }
+
+    /** 封禁 / 解封 / 设角色 / 重置密码。fields 是要改的字段，没传的不动 */
+    public static void adminUserSet(final Context ctx, final long id, final String fields,
+                                    final Callback cb) {
+        post(ctx, "admin_user_set", "{\"id\":" + id + (fields.length() > 0 ? "," + fields : "") + "}", cb, true);
+    }
+
+    public static void adminDelPlaylist(final Context ctx, final long id, final Callback cb) {
+        post(ctx, "admin_del_playlist", "{\"id\":" + id + "}", cb, true);
+    }
+
+    public static void adminRestorePlaylist(final Context ctx, final long id, final Callback cb) {
+        post(ctx, "admin_restore_playlist", "{\"id\":" + id + "}", cb, true);
+    }
+
+    public static void adminDelComment(final Context ctx, final long id, final Callback cb) {
+        post(ctx, "admin_del_comment", "{\"id\":" + id + "}", cb, true);
+    }
+
+    private static String enc(String s) {
+        if (s == null) return "";
+        try { return java.net.URLEncoder.encode(s, "UTF-8"); }
+        catch (Throwable t) { return ""; }
+    }
+
+    /**
+     * 管理接口的通用 GET。
+     *
+     * <p>token 放在 **query string** 里 —— {@code call()} 不发 Authorization 头，
+     * 而服务端的 {@code q_input()} 会把 {@code $_GET} 合并进来，
+     * 所以 {@code q_auth()} 从 URL 里也能读到。
+     */
+    private static void get(final Context ctx, final String action, final String extra,
+                            final Callback cb) {
+        final String tk = token(ctx);
+        Library.pool().execute(new Runnable() {
+            @Override public void run() {
+                try {
+                    Reply r = call(BASE + "?a=" + action + extra + "&token=" + enc(tk), null);
                     if (r.error != null) { done(cb, null, r.error); return; }
                     done(cb, Json.path(r.root, "data"), null);
                 } catch (Throwable t) {

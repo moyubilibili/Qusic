@@ -71,10 +71,14 @@ public final class Library {
     }
 
     // ── 载入 / 持久化 ───────────────────────────────────────────────────────
+    /** 封面缓存格式版本：改了封面来源或缓存规则就 +1，会自动清掉旧缓存 */
+    private static final int COVER_CACHE_VERSION = 2;
+
     public static void init(Context ctx) {
         if (sLoaded) return;
         sLoaded = true;
         sPrefs = ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        purgeStaleCoverCache(ctx);
         String json = sPrefs.getString(KEY_SONGS, null);
         if (json == null) return;
         try {
@@ -404,7 +408,10 @@ public final class Library {
         if (s == null) return null;
         if (s.cover != null && !s.cover.isRecycled()) return s.cover;
 
-        String key = s.id + ":" + reqSize;
+        // 缓存 key 里带上封面 URL 的指纹。
+        // 只按 id 缓存的话，一旦封面源变了（比如酷我那次把 MV 截图换成专辑封面），
+        // 老歌会一直显示磁盘上那份旧图，永远不刷新。
+        String key = s.id + ":" + reqSize + ":" + urlTag(s.coverUrl);
         Bitmap cached = mem().get(key);
         if (cached != null && !cached.isRecycled()) { s.cover = cached; return cached; }
 
@@ -502,6 +509,34 @@ public final class Library {
         int n;
         while ((n = in.read(buf)) > 0) bo.write(buf, 0, n);
         return bo.toByteArray();
+    }
+
+    /** 取封面 URL 的短指纹（FNV-1a，够用且不用引入哈希库） */
+    private static String urlTag(String url) {
+        if (url == null || url.length() == 0) return "0";
+        int h = 0x811c9dc5;
+        for (int i = 0; i < url.length(); i++) {
+            h ^= url.charAt(i);
+            h *= 0x01000193;
+        }
+        return Integer.toHexString(h);
+    }
+
+    /**
+     * 缓存规则换代后清一次旧封面。
+     *
+     * <p>key 变了以后老的 jpg 就再也匹配不上了，留着只是白占空间
+     * （而且如果用户此前看的全是 MV 截图，那些文件还挺大）。
+     */
+    private static void purgeStaleCoverCache(Context ctx) {
+        try {
+            int seen = sPrefs.getInt("cover_cache_ver", 0);
+            if (seen == COVER_CACHE_VERSION) return;
+            File dir = new File(ctx.getCacheDir(), CACHE_DIR);
+            File[] fs = dir.listFiles();
+            if (fs != null) for (File f : fs) { try { f.delete(); } catch (Throwable ignored) {} }
+            sPrefs.edit().putInt("cover_cache_ver", COVER_CACHE_VERSION).apply();
+        } catch (Throwable ignored) {}
     }
 
     private static File diskFile(Context ctx, String key) {

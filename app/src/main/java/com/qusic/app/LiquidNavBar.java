@@ -57,6 +57,7 @@ public class LiquidNavBar extends View {
     private float entrance = 0f;
 
     private OnTabSelected cb;
+
     private final Icons.NavIcon[] icons = new Icons.NavIcon[5];
     private ValueAnimator indAnim;
 
@@ -151,6 +152,7 @@ public class LiquidNavBar extends View {
 
     @Override protected void onMeasure(int wSpec, int hSpec) {
         int w = MeasureSpec.getSize(wSpec);
+        // 玻璃模式：悬浮胶囊，高度只有 64dp，手势条由外边距承担（Kyant 也是这个高度）
         int h = (int) dp(80) + bottomInset;   // MD3 80dp 内容 + 手势条，整条贴底
         setMeasuredDimension(w, resolveSize(h, hSpec));
     }
@@ -182,6 +184,14 @@ public class LiquidNavBar extends View {
         indPath.addRoundRect(indRect, ih / 2, ih / 2, Path.Direction.CW);
     }
 
+    @Override protected void onAttachedToWindow() {
+        super.onAttachedToWindow();
+    }
+
+    @Override protected void onDetachedFromWindow() {
+        super.onDetachedFromWindow();
+    }
+
     @Override protected void onDraw(Canvas c) {
         if (bounds.width() <= 1) return;
         updateIndicator();
@@ -197,6 +207,7 @@ public class LiquidNavBar extends View {
             c.scale(pressScale, pressScale, bounds.centerX(), bounds.centerY());
         }
 
+        // ① 容器背景
         // ① 容器背景（MD3 surfaceContainer）
         p.reset(); p.setStyle(Paint.Style.FILL);
         p.setColor(t.surfaceContainer);

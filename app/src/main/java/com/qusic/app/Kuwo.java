@@ -254,8 +254,23 @@ public final class Kuwo {
         long sec = Json.lng(o, "DURATION");
         s.durationMs = sec > 0 ? sec * 1000L : 0;
 
-        s.coverUrl = nz(Json.str(o, "hts_MVPIC"), "");
-        if (s.coverUrl.length() == 0) s.coverUrl = nz(Json.str(o, "web_albumpic_short"), "");
+        // ── 封面：专辑图优先，MV 截图只作兜底 ──
+        //
+        // 这里踩过一个坑：原来优先取 hts_MVPIC，但那个 URL 里是 **wmvpic**，
+        // 也就是 **MV 的画面截图**，不是专辑封面 —— 所以列表里显示的
+        // 全是音乐录影带的截帧。web_albumpic_short 才是专辑封面。
+        //
+        // web_albumpic_short 是相对路径，形如 "120/s3s94/93/211513640.jpg"，
+        // 开头那段是尺寸。120 那档在大屏上很糊，换成 500
+        // （实测 120→9.9KB，500→108KB，封面有磁盘缓存，这个代价可以接受）。
+        String alb = Json.str(o, "web_albumpic_short");
+        if (alb != null && alb.length() > 0) {
+            String big = alb.replaceFirst("^\\d+/", "500/");
+            s.coverUrl = "https://img1.kuwo.cn/star/albumcover/" + big;
+        } else {
+            // 实在没有专辑图，才退回 MV 截图
+            s.coverUrl = nz(Json.str(o, "hts_MVPIC"), "");
+        }
 
         s.uri = "kuwo:" + s.neteaseId;
         s.path = s.uri;

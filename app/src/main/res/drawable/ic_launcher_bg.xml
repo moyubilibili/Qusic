@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  背景层。
+  原来是亮蓝→紫的高饱和渐变，跟应用主题（默认种子色是一支偏灰的蓝）不搭。
+  这里换成同色系的深浅渐变：有层次但不喧哗，MD3 的图标背景通常就是这么克制的。
+-->
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
     <gradient
-        android:startColor="#6E8BFF"
-        android:centerColor="#4C6FFF"
-        android:endColor="#8B4DFF"
+        android:startColor="#5B6CB8"
+        android:centerColor="#4E5DA6"
+        android:endColor="#3E4C8C"
         android:angle="315" />
 </shape>
