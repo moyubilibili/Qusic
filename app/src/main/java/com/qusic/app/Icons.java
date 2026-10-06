@@ -99,6 +99,12 @@ public final class Icons {
             Icons.draw(c, "search", box, color, 1f, null);
         }
     };
+    /** 社区：复用 queue 图标，**不新增 drawable**，省安装包体积 */
+    public static final NavIcon COMMUNITY = new NavIcon() {
+        @Override public void draw(Canvas c, RectF box, int color, float sel) {
+            Icons.draw(c, "queue", box, color, 1f, null);
+        }
+    };
     public static final NavIcon ABOUT = new NavIcon() {
         @Override public void draw(Canvas c, RectF box, int color, float sel) {
             Icons.draw(c, "info", box, color, 1f, null);

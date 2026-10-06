@@ -620,6 +620,25 @@ public class LibraryPage {
         }
 
         // 导出成 .Qusic —— 用带文字的按钮，别藏在「更多」里让人找不到
+        TextView shr = new TextView(c);
+        shr.setText("分享");
+        shr.setTextSize(12.5f);
+        shr.setTypeface(Ui.tfMed());
+        shr.setTextColor(t.onSecondaryContainer);
+        shr.setPadding(Ui.px(c, 14), Ui.px(c, 8), Ui.px(c, 14), Ui.px(c, 8));
+        shr.setBackground(pill(t.secondaryContainer, Ui.px(c, 20)));
+        shr.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                Ui.hapticLight(v);
+                act.shareToCommunity(cur);
+            }
+        });
+        LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        slp.leftMargin = Ui.px(c, 8);
+        head.addView(shr, slp);
+
         TextView exp = new TextView(c);
         exp.setText("导出");
         exp.setTextSize(12.5f);
@@ -729,11 +748,12 @@ public class LibraryPage {
     private void playlistMenu(final Playlist.Item it) {
         new MdDialog.Builder(act)
                 .title(it.name)
-                .items(new String[]{"导出为 .Qusic", "重命名", "删除歌单"},
+                .items(new String[]{"分享到社区", "导出为 .Qusic", "重命名", "删除歌单"},
                         new android.content.DialogInterface.OnClickListener() {
                     @Override public void onClick(android.content.DialogInterface d, int which) {
-                        if (which == 0) act.exportPlaylist(it.id);
-                        else if (which == 1) askRenamePlaylist(it);
+                        if (which == 0) act.shareToCommunity(it);
+                        else if (which == 1) act.exportPlaylist(it.id);
+                        else if (which == 2) askRenamePlaylist(it);
                         else askDeletePlaylist(it);
                     }
                 }).show();

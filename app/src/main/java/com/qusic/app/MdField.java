@@ -112,6 +112,39 @@ public class MdField extends FrameLayout {
 
     public void setLabel(String h) { label = h == null ? "" : h; invalidate(); }
 
+    /** 调整输入字号（标签会跟着小一号） */
+    public void setTextSize(float sp) {
+        input.setTextSize(sp);
+        baseSize = sp;
+        invalidate();
+    }
+    private float baseSize = 15f;
+
+    /** 密码模式 */
+    public void setPassword(boolean b) {
+        input.setInputType(b
+                ? (InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD)
+                : (InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES));
+        input.setTypeface(android.graphics.Typeface.create(
+                b ? "sans-serif" : "sans-serif", android.graphics.Typeface.NORMAL));
+        invalidate();
+    }
+
+    /** 键盘「完成/搜索」时触发 */
+    public void setOnSubmit(final Runnable r) {
+        input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+        input.setOnEditorActionListener(new android.widget.TextView.OnEditorActionListener() {
+            @Override public boolean onEditorAction(android.widget.TextView v, int actionId,
+                                                    android.view.KeyEvent e) {
+                if (e == null || e.getKeyCode() == android.view.KeyEvent.KEYCODE_ENTER) {
+                    if (r != null) r.run();
+                    return true;
+                }
+                return false;
+            }
+        });
+    }
+
     public void setNumeric(boolean b) {
         input.setInputType(b ? InputType.TYPE_CLASS_NUMBER
                 : (InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES));
@@ -149,7 +182,7 @@ public class MdField extends FrameLayout {
 
         // ── 浮动标签 ──
         // floatT=0：停在输入位置当 placeholder；floatT=1：缩小上浮
-        float sizeBig = sp(15), sizeSmall = sp(11.5f);
+        float sizeBig = sp(baseSize), sizeSmall = sp(baseSize * 0.77f);
         float sz = sizeBig + (sizeSmall - sizeBig) * floatT;
         p.reset();
         p.setTextAlign(Paint.Align.LEFT);

@@ -29,8 +29,8 @@ public class LiquidNavBar extends View {
 
     public interface OnTabSelected { void onSelect(int index); }
 
-    private static final String[] LABELS = {"首页", "曲库", "搜索", "关于"};
-    private static final int N = 4;
+    private static final String[] LABELS = {"首页", "曲库", "搜索", "社区", "关于"};
+    private static final int N = 5;
 
     /** MD3 规格：指示器 64×32dp */
     private static final float IND_W = 64f;
@@ -63,7 +63,7 @@ public class LiquidNavBar extends View {
         indPos = indTarget = initialTab;
         setLayerType(LAYER_TYPE_HARDWARE, null);
         icons[0] = Icons.HOME; icons[1] = Icons.LIBRARY;
-        icons[2] = Icons.SEARCH; icons[3] = Icons.ABOUT;
+        icons[2] = Icons.SEARCH; icons[3] = Icons.COMMUNITY; icons[4] = Icons.ABOUT;
     }
 
     public void setOnTabSelected(OnTabSelected c) { this.cb = c; }

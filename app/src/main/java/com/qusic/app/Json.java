@@ -18,6 +18,35 @@ public final class Json {
 
     private Json(String s) { this.s = s; }
 
+    /**
+     * 把一个字符串安全地转成 JSON 字符串字面量（含首尾引号）。
+     *
+     * <p>拼 JSON 请求体时必须用它，否则用户输入里的引号、换行、反斜杠
+     * 会把结构破坏掉（既能造成请求失败，也是注入面）。
+     */
+    public static String q(String s) {
+        if (s == null) return "null";
+        StringBuilder sb = new StringBuilder(s.length() + 2);
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"':  sb.append("\\\""); break;
+                case '\\': sb.append("\\\\"); break;
+                case '\n': sb.append("\\n"); break;
+                case '\r': sb.append("\\r"); break;
+                case '\t': sb.append("\\t"); break;
+                case '\b': sb.append("\\b"); break;
+                case '\f': sb.append("\\f"); break;
+                default:
+                    if (c < 0x20) sb.append(String.format(java.util.Locale.US, "\\u%04x", (int) c));
+                    else sb.append(c);
+            }
+        }
+        sb.append('"');
+        return sb.toString();
+    }
+
     public static Object parse(String text) {
         if (text == null) return null;
         Json j = new Json(text);

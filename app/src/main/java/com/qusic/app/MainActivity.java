@@ -61,6 +61,7 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     private HomePage homePage;
     private LibraryPage libraryPage;
     private SearchPage searchPage;
+    private CommunityPage communityPage;
     private AboutPage aboutPage;
     private View currentPage;
     private int currentTab = 0;
@@ -87,6 +88,7 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         Library.init(this);   // 恢复上次导入的曲库
         History.init(this);   // 恢复播放历史
         Playlist.init(this);  // 恢复歌单
+        Community.init(this); // 社区登录状态
         Theme.setListener(new Theme.Listener() {
             @Override public void onThemeChanged(Tokens t) { recreate(); }
         });
@@ -153,6 +155,7 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         });
         libraryPage = new LibraryPage(this);
         searchPage = new SearchPage(this);
+        communityPage = new CommunityPage(this);
         aboutPage = new AboutPage(this);
 
         float density = getResources().getDisplayMetrics().density;
@@ -282,9 +285,11 @@ public class MainActivity extends Activity implements PlayerService.Listener {
             case 0: next = homePage.view(); break;
             case 1: next = libraryPage.view(); break;
             case 2: next = searchPage.view(); break;
-            case 3: next = aboutPage.view(); break;
+            case 3: next = communityPage.view(); break;
+            case 4: next = aboutPage.view(); break;
         }
         if (next == null) return;
+        if (index == 3 && communityPage != null) communityPage.onShown();
 
         if (navBar != null && !switchingTab) {
             switchingTab = true;
@@ -512,6 +517,11 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         return new String(bos.toByteArray(), "UTF-8");
     }
 
+    /** 分享歌单到社区（曲库页调用） */
+    public void shareToCommunity(Playlist.Item it) {
+        if (communityPage != null) communityPage.share(it);
+    }
+
     /** 供「关于」页调用 */
     public void checkForUpdatesManually() { checkForUpdates(true); }
 
@@ -525,6 +535,7 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         if (libraryPage != null) libraryPage.refresh();
         if (homePage != null) homePage.refresh();
         if (searchPage != null) searchPage.refresh();
+        if (communityPage != null && currentTab == 3) communityPage.load();
         if (aboutPage != null) aboutPage.refreshStats();
     }
 

@@ -68,13 +68,24 @@ if [ "$JAVAC_RC" -ne 0 ]; then
   exit 1
 fi
 
-echo "== 4/7 d8 =="
+echo "== 4/7 R8（压缩 + 混淆 + 打包）=="
 find "$OUT/classes" -name '*.class' > "$OUT/classes.txt"
-java -cp "$TOOL/r8.jar" com.android.tools.r8.D8 \
+# 用 R8 而不是 D8：D8 只是打包器，会把所有方法原样写进 dex；
+# R8 会做可达性分析，裁掉没被引用到的代码，并缩短类名/方法名 —— 体积能小一大截。
+java -cp "$TOOL/r8.jar" com.android.tools.r8.R8 \
+  --release \
   --lib "$TOOL/android.jar" \
   --min-api 21 \
+  --pg-conf "$PROJ/proguard-rules.pro" \
+  --pg-map-output "$OUT/mapping.txt" \
   --output "$OUT/dex" \
-  @"$OUT/classes.txt" 2>&1 | head -30
+  @"$OUT/classes.txt" > "$OUT/r8.log" 2>&1
+R8_RC=$?
+grep -iE "error|warning: " "$OUT/r8.log" | head -20
+if [ "$R8_RC" -ne 0 ]; then
+  echo "!! R8 失败 —— 中止构建"; tail -20 "$OUT/r8.log"; exit 1
+fi
+ls -la "$OUT/dex"/*.dex 2>/dev/null | awk '{printf "   %s  %.1f KB\n", $NF, $5/1024}' 
 [ -f "$OUT/dex/classes.dex" ] || { echo "!! d8 失败"; exit 1; }
 
 echo "== 5/7 打包 dex =="
