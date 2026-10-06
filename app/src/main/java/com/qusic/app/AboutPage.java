@@ -225,6 +225,9 @@ public class AboutPage {
         col.addView(lib, fullWidth());
 
         // ── 说明 ──
+        col.addView(section(c, "每日一句", t));
+        col.addView(buildQuoteCard(c, t), fullWidth());
+
         col.addView(section(c, "关于", t));
         TextView about = new TextView(c);
         about.setText("Qusic 是一个完全离线的本地音乐播放器。\n\n"
@@ -263,6 +266,101 @@ public class AboutPage {
     private LinearLayout.LayoutParams fullWidth() {
         return new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+    }
+
+    /** 每日名言的当前索引（点「换一句」后临时改它） */
+    private int quoteIdx = -1;
+
+    private View buildQuoteCard(Context c, Tokens t) {
+        final LinearLayout box = Ui.column(c);
+        box.setBackground(card(t));
+        box.setPadding(Ui.px(c, 20), Ui.px(c, 18), Ui.px(c, 20), Ui.px(c, 14));
+
+        final Quotes.Quote q = quoteIdx < 0 ? Quotes.today() : Quotes.at(quoteIdx);
+
+        // 引号装饰
+        TextView mark = new TextView(c);
+        mark.setText("\u201C");
+        mark.setTextSize(34);
+        mark.setTypeface(Ui.tfBold());
+        mark.setTextColor(Hct.withAlpha(t.primary, 0.35f));
+        mark.setPadding(0, 0, 0, Ui.px(c, 2));
+        box.addView(mark);
+
+        final TextView body = new TextView(c);
+        body.setText(q.text);
+        body.setTextColor(t.onSurface);
+        body.setTextSize(15.5f);
+        body.setLineSpacing(Ui.px(c, 7), 1f);
+        body.setTypeface(Ui.tfMed());
+        box.addView(body);
+
+        final TextView who = new TextView(c);
+        who.setText("—— " + q.author);
+        who.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.85f));
+        who.setTextSize(12.5f);
+        who.setPadding(0, Ui.px(c, 10), 0, Ui.px(c, 10));
+        box.addView(who);
+
+        LinearLayout tools = Ui.row(c);
+        tools.setGravity(Gravity.END);
+
+        TextView copy = smallTool(c, t, "复制", "content_copy", new Runnable() {
+            @Override public void run() {
+                android.content.ClipboardManager cm = (android.content.ClipboardManager)
+                        act.getSystemService(Context.CLIPBOARD_SERVICE);
+                if (cm != null) {
+                    cm.setPrimaryClip(android.content.ClipData.newPlainText(
+                            "Qusic 每日一句", q.text + " —— " + q.author));
+                    Toast.makeText(act, "已复制", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+        tools.addView(copy);
+
+        TextView another = smallTool(c, t, "换一句", "refresh", new Runnable() {
+            @Override public void run() {
+                // 只是临时换一条看看，明天还是回到「每日」那句
+                quoteIdx = new java.util.Random().nextInt(Quotes.count());
+                Quotes.Quote nq = Quotes.at(quoteIdx);
+                body.setText(nq.text);
+                who.setText("—— " + nq.author);
+            }
+        });
+        LinearLayout.LayoutParams alp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        alp.leftMargin = Ui.px(c, 8);
+        tools.addView(another, alp);
+        box.addView(tools);
+
+        return box;
+    }
+
+    /** 全圆角胶囊背景 */
+    private android.graphics.drawable.Drawable pill(int color, float r) {
+        android.graphics.drawable.GradientDrawable g =
+                new android.graphics.drawable.GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(r);
+        return g;
+    }
+
+    /** 卡片里的小工具按钮（文字 + 图标） */
+    private TextView smallTool(Context c, Tokens t, String label, String icon,
+                               final Runnable r) {
+        TextView b = new TextView(c);
+        b.setText(label);
+        b.setTextSize(12.5f);
+        b.setTypeface(Ui.tfMed());
+        b.setTextColor(t.primary);
+        b.setPadding(Ui.px(c, 14), Ui.px(c, 8), Ui.px(c, 14), Ui.px(c, 8));
+        b.setBackground(pill(t.primaryContainer, Ui.px(c, 20)));
+        Ui.pressable(b);
+        b.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { Ui.hapticLight(v); r.run(); }
+        });
+        return b;
     }
 
     private android.graphics.drawable.Drawable card(Tokens t) {

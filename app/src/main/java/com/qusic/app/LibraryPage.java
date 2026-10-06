@@ -10,6 +10,7 @@ import android.widget.FrameLayout;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -36,6 +37,9 @@ public class LibraryPage {
     private android.widget.ScrollView albumScroll;
     private LinearLayout emptyBox;
     private LinearLayout opsRow;
+    /** 多选操作栏（选中歌曲时出现） */
+    private LinearLayout selRow;
+    private TextView selCountLabel;
     private android.widget.ScrollView plScroll;
     private LinearLayout plBox;
     /** 当前打开的曲目选择：0=没打开，否则是歌单 id */
@@ -115,7 +119,12 @@ public class LibraryPage {
 
         segmented = new SegmentedBar(c, new String[]{"歌曲", "专辑", "歌手", "最近", "歌单"});
         segmented.setOnChange(new SegmentedBar.OnChange() {
-            @Override public void onChange(int i) { mode = i; applyMode(); }
+            @Override public void onChange(int i) {
+                // 换分段时退出多选 —— 选的歌可能在新分段里根本看不见
+                if (listView != null) listView.exitSelection();
+                mode = i;
+                applyMode();
+            }
         });
         header.addView(segmented, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, Ui.px(c, 44)));
@@ -198,10 +207,43 @@ public class LibraryPage {
 
         opsRow = ops;
         header.addView(ops);
+
+        // ── 多选操作栏 ──
+        // 长按歌曲进入多选后出现，替代原来的工具行。
+        selRow = Ui.row(c);
+        selRow.setGravity(Gravity.CENTER_VERTICAL);
+        selRow.setPadding(0, Ui.px(c, 12), 0, Ui.px(c, 8));
+        selRow.setVisibility(View.GONE);
+
+        selCountLabel = new TextView(c);
+        selCountLabel.setTextSize(13.5f);
+        selCountLabel.setTypeface(Ui.tfBold());
+        selCountLabel.setTextColor(t.onSurface);
+        selRow.addView(selCountLabel, new LinearLayout.LayoutParams(0,
+                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+
+        selRow.addView(selBtn(c, t, "全选", false, new Runnable() {
+            @Override public void run() { listView.toggleSelectAll(); }
+        }));
+        selRow.addView(selBtn(c, t, "添加到歌单", true, new Runnable() {
+            @Override public void run() { addSelectedToPlaylist(); }
+        }));
+        selRow.addView(selBtn(c, t, "取消", false, new Runnable() {
+            @Override public void run() { listView.exitSelection(); }
+        }));
+        header.addView(selRow);
         col.addView(header);
 
         // 歌曲列表
         listView = new SongListView(c);
+        // 多选状态变化 → 切换工具行 / 多选栏
+        listView.setOnSelectionChanged(new SongListView.OnSelectionChanged() {
+            @Override public void onSelectionChanged(int count, boolean selecting) {
+                showSelectionBar(selecting, count);
+            }
+        });
+        // 长按现在由 SongListView 内部处理（进入多选），这个回调不再触发；
+        // 保留是为了兼容，将来若要多选之外的长按行为可以在这里接。
         listView.setOnLongPick(new SongListView.OnLongPick() {
             @Override public void onLongPick(List<Song> visible, int index) {
                 if (index >= 0 && index < visible.size()) askAddToPlaylist(visible.get(index));
@@ -817,6 +859,58 @@ public class LibraryPage {
     }
 
     /** 「添加到歌单」—— 直接复用 Playlist 里的公用弹窗 */
+    // ── 多选 ───────────────────────────────────────────────────────────────
+    /** 是否正处在多选模式（给返回键用） */
+    public boolean isSelecting() { return listView != null && listView.isSelecting(); }
+    public void exitSelection() { if (listView != null) listView.exitSelection(); }
+
+    private TextView selBtn(Context c, Tokens t, String label, boolean primary,
+                            final Runnable r) {
+        TextView b = new TextView(c);
+        b.setText(label);
+        b.setTextSize(12.5f);
+        b.setTypeface(primary ? Ui.tfBold() : Ui.tfMed());
+        b.setTextColor(primary ? t.onPrimary : t.onSecondaryContainer);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(Ui.px(c, 14), Ui.px(c, 9), Ui.px(c, 14), Ui.px(c, 9));
+        b.setBackground(pill(primary ? t.primary : t.secondaryContainer, Ui.px(c, 20)));
+        Ui.pressable(b);
+        b.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { Ui.hapticLight(v); r.run(); }
+        });
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = Ui.px(c, 8);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    /** 把选中的歌一次性加进某个歌单 */
+    private void addSelectedToPlaylist() {
+        final List<Song> picked = listView.selectedSongs();
+        if (picked.isEmpty()) {
+            Toast.makeText(act, "还没选歌", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Playlist.showAddDialogFor(act, picked, new Runnable() {
+            @Override public void run() {
+                listView.exitSelection();
+                refresh();
+            }
+        });
+    }
+
+    /** 多选状态变化 → 切换工具行 / 多选栏 */
+    private void showSelectionBar(boolean selecting, int count) {
+        if (selRow == null) return;
+        selRow.setVisibility(selecting ? View.VISIBLE : View.GONE);
+        if (opsRow != null && mode == MODE_SONGS) {
+            opsRow.setVisibility(selecting ? View.GONE : View.VISIBLE);
+        }
+        if (selCountLabel != null) selCountLabel.setText("已选 " + count + " 首");
+    }
+
     public void askAddToPlaylist(final Song song) {
         Playlist.showAddDialog(act, song, new Runnable() {
             @Override public void run() { refresh(); }

@@ -896,6 +896,11 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     }
 
     @Override public void onBackPressed() {
+        // 多选模式：返回键先退出多选，而不是切页
+        if (currentTab == 1 && libraryPage != null && libraryPage.isSelecting()) {
+            libraryPage.exitSelection();
+            return;
+        }
         // 歌单详情页优先关闭
         if (detailOpen) { closePlaylistDetail(); return; }
         // 社区帖子详情（二级页面）优先关闭

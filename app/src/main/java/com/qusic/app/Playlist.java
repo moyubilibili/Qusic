@@ -413,6 +413,76 @@ public final class Playlist {
                 }).show();
     }
 
+    /**
+     * 批量添加：一次把多首歌加进某个歌单。
+     *
+     * <p>「（已添加）」只在**全部**都已经在歌单里时才标 —— 部分已有时标了反而误导。
+     */
+    public static void showAddDialogFor(final android.app.Activity act,
+                                        final List<Song> songs,
+                                        final Runnable onChanged) {
+        if (act == null || songs == null || songs.isEmpty()) return;
+        init(act);
+        final List<Item> lists = all();
+
+        boolean allIn = new ArrayList<Item>(lists).size() > 0;
+        final List<String> names = new ArrayList<>();
+        names.add("＋ 新建歌单…");
+        for (Item it : lists) {
+            boolean every = true;
+            for (Song s : songs) {
+                if (!contains(it.id, s)) { every = false; break; }
+            }
+            names.add(it.name + (every ? "（已全部添加）" : ""));
+        }
+
+        new MdDialog.Builder(act)
+                .title("把 " + songs.size() + " 首歌添加到歌单")
+                .items(names.toArray(new String[0]),
+                        new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int which) {
+                        if (which == 0) {
+                            askNameAndCreateFor(act, songs, onChanged);
+                        } else {
+                            Item it = lists.get(which - 1);
+                            int ok = 0, dup = 0;
+                            for (Song s : songs) {
+                                if (add(act, it.id, s)) ok++; else dup++;
+                            }
+                            StringBuilder m = new StringBuilder();
+                            m.append("已添加 ").append(ok).append(" 首到「")
+                             .append(it.name).append("」");
+                            if (dup > 0) m.append("，").append(dup).append(" 首已存在");
+                            android.widget.Toast.makeText(act, m.toString(),
+                                    android.widget.Toast.LENGTH_SHORT).show();
+                            if (onChanged != null) onChanged.run();
+                        }
+                    }
+                }).show();
+    }
+
+    /** 新建歌单并批量添加 */
+    public static void askNameAndCreateFor(final android.app.Activity act,
+                                           final List<Song> songs, final Runnable onChanged) {
+        final MdField et = new MdField(act, "歌单名字");
+        et.focus();
+        new MdDialog.Builder(act)
+                .title("新建歌单并添加 " + (songs == null ? 0 : songs.size()) + " 首")
+                .content(et)
+                .negative("取消", null)
+                .positive("创建", new MdDialog.OnClick() {
+                    @Override public void onClick() {
+                        Item it = create(act, et.text());
+                        int ok = 0;
+                        if (songs != null) for (Song s : songs) if (add(act, it.id, s)) ok++;
+                        android.widget.Toast.makeText(act,
+                                "已添加 " + ok + " 首到「" + it.name + "」",
+                                android.widget.Toast.LENGTH_SHORT).show();
+                        if (onChanged != null) onChanged.run();
+                    }
+                }).show();
+    }
+
     /** 新建歌单并添加这首歌 */
     public static void askNameAndCreate(final android.app.Activity act, final Song song,
                                         final Runnable onChanged) {

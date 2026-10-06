@@ -74,7 +74,6 @@ public final class Updater {
      * 只可能解析出 2.x 以上，所以旧的差异不会造成误判。
      */
     public static int parseVersion(String tag) {
-    public static int parseVersion(String tag) {
         if (tag == null) return 0;
         String s = tag.trim();
         if (s.startsWith("v") || s.startsWith("V")) s = s.substring(1);

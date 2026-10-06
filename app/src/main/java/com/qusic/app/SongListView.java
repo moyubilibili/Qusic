@@ -35,6 +35,9 @@ public class SongListView extends View implements PlayerService.Listener {
     /** 长按某一行的回调（用于「添加到歌单」这类操作） */
     public interface OnLongPick { void onLongPick(List<Song> visible, int index); }
 
+    /** 多选状态变化的回调（选择数量变了、或退出了多选） */
+    public interface OnSelectionChanged { void onSelectionChanged(int count, boolean selecting); }
+
     public interface OnPick {
         void onPick(List<Song> visible, int index);
         default void onLongPick(Song s, int index) {}
@@ -48,6 +51,13 @@ public class SongListView extends View implements PlayerService.Listener {
     private final RectF coverRect = new RectF();
 
     private List<Song> data = new ArrayList<>();
+
+    // ── 多选 ──────────────────────────────────────────────────────────────
+    /** 是否处于多选模式 */
+    private boolean selecting = false;
+    /** 已选中的歌曲 id */
+    private final java.util.LinkedHashSet<Long> selected = new java.util.LinkedHashSet<>();
+    private OnSelectionChanged selCb;
     private OnPick cb;
 
     private float scrollY = 0f;       // 当前滚动偏移（px）
@@ -103,7 +113,17 @@ public class SongListView extends View implements PlayerService.Listener {
             if (!dragging || moved || pressed < 0) return;
             longFired = true;
             Ui.hapticStrong(SongListView.this);
-            if (longCb != null) longCb.onLongPick(data(), pressed);
+            // 长按 = 进入多选，并选中这一首。
+            // 这样「加一首」和「加一批」是同一个入口 —— 选一首就是加一首。
+            if (selecting) {
+                // 已经在多选里了：长按当成反选
+                Song s = data.get(pressed);
+                if (selected.contains(s.id)) selected.remove(s.id);
+                else selected.add(s.id);
+                notifySelection();
+            } else {
+                enterSelection(data.get(pressed));
+            }
             pressed = -1;
             invalidate();
         }
@@ -123,6 +143,56 @@ public class SongListView extends View implements PlayerService.Listener {
 
     public void setOnPick(OnPick c) { this.cb = c; }
     public void setOnLongPick(OnLongPick c) { this.longCb = c; }
+    public void setOnSelectionChanged(OnSelectionChanged c) { this.selCb = c; }
+
+    // ── 多选 API ───────────────────────────────────────────────────────────
+    public boolean isSelecting() { return selecting; }
+    public int selectedCount() { return selected.size(); }
+
+    /** 进入多选并选中这一首 */
+    public void enterSelection(Song first) {
+        selecting = true;
+        selected.clear();
+        if (first != null) selected.add(first.id);
+        startLoop();
+        invalidate();
+        notifySelection();
+    }
+
+    public void exitSelection() {
+        if (!selecting && selected.isEmpty()) return;
+        selecting = false;
+        selected.clear();
+        invalidate();
+        notifySelection();
+    }
+
+    /** 全选当前列表 */
+    public void selectAll() {
+        selected.clear();
+        for (Song s : data) selected.add(s.id);
+        invalidate();
+        notifySelection();
+    }
+
+    /** 反选（全选状态下再点就是取消全选） */
+    public void toggleSelectAll() {
+        if (selected.size() >= data.size()) { selected.clear(); }
+        else { for (Song s : data) selected.add(s.id); }
+        invalidate();
+        notifySelection();
+    }
+
+    /** 当前选中的歌曲（按列表顺序） */
+    public List<Song> selectedSongs() {
+        List<Song> out = new ArrayList<>();
+        for (Song s : data) if (selected.contains(s.id)) out.add(s);
+        return out;
+    }
+
+    private void notifySelection() {
+        if (selCb != null) selCb.onSelectionChanged(selected.size(), selecting);
+    }
 
     public void setData(List<Song> list) {
         List<Song> next = list != null ? list : new ArrayList<Song>();
@@ -338,8 +408,13 @@ public class SongListView extends View implements PlayerService.Listener {
         boolean isCurrent = s.id == currentId;
         boolean isPressed = i == pressed;
         float press = isPressed ? pressAnim : 0f;
+        boolean checked = selecting && selected.contains(s.id);
 
         rowRect.set(dp(10), top + dy + dp(2), getWidth() - dp(10), top + dy + rh - dp(2));
+
+        // 多选时：勾选框占走左边一块，整行内容右移
+        final float checkW = selecting ? dp(46) : 0f;
+        if (selecting) rowRect.left += checkW;
 
         // ★ 性能关键：saveLayer 会给这一行**单独分配一块离屏缓冲**，
         // 每个可见行每帧一次 —— 8 行就是每帧 8 块，必掉帧。
@@ -367,6 +442,36 @@ public class SongListView extends View implements PlayerService.Listener {
             p.setColor(Color.TRANSPARENT);
         }
         c.drawPath(tmp, p);
+
+        // ── 多选勾选框 ──
+        if (selecting) {
+            float r = dp(10);
+            float cx = rowRect.left - checkW / 2f;
+            float cy = rowRect.centerY();
+            p.reset(); p.setStyle(Paint.Style.FILL);
+            if (checked) {
+                p.setColor(t.primary);
+                c.drawCircle(cx, cy, r, p);
+                // 对勾：两笔
+                p.setColor(t.onPrimary);
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(dp(2));
+                p.setStrokeCap(Paint.Cap.ROUND);
+                p.setStrokeJoin(Paint.Join.ROUND);
+                tmp.reset();
+                tmp.moveTo(cx - r * 0.42f, cy + r * 0.02f);
+                tmp.lineTo(cx - r * 0.10f, cy + r * 0.34f);
+                tmp.lineTo(cx + r * 0.46f, cy - r * 0.34f);
+                c.drawPath(tmp, p);
+                p.setStyle(Paint.Style.FILL);
+            } else {
+                p.setColor(Hct.withAlpha(t.onSurfaceVariant, 0.35f));
+                p.setStyle(Paint.Style.STROKE);
+                p.setStrokeWidth(dp(1.6f));
+                c.drawCircle(cx, cy, r, p);
+                p.setStyle(Paint.Style.FILL);
+            }
+        }
 
         // 封面
         float cs = rowRect.height() - dp(12);
@@ -627,9 +732,18 @@ public class SongListView extends View implements PlayerService.Listener {
                 velocity = 0;
                 if (!moved) {
                     int i = rowAt(y);
-                    if (i >= 0 && i == pressed && cb != null) {
+                    if (i >= 0 && i == pressed) {
                         Ui.hapticLight(this);
-                        cb.onPick(data, i);
+                        if (selecting) {
+                            // 多选模式下点击 = 勾选/取消，不播放
+                            Song s = data.get(i);
+                            if (selected.contains(s.id)) selected.remove(s.id);
+                            else selected.add(s.id);
+                            invalidate();
+                            notifySelection();
+                        } else if (cb != null) {
+                            cb.onPick(data, i);
+                        }
                     }
                 }
                 pressed = -1;
