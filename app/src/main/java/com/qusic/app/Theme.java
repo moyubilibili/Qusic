@@ -26,6 +26,7 @@ public final class Theme {
     public static final String K_CLOUD = "cloud";
     public static final String K_PSTYLE = "player_style";
     public static final String K_AUTOUPDATE = "auto_update";
+    public static final String K_COMMUNITY = "show_community";
 
     /** 动画速度档位 */
     public static final int ANIM_FAST = 0, ANIM_NORMAL = 1, ANIM_SUBTLE = 2;
@@ -39,6 +40,7 @@ public final class Theme {
     private static boolean sCloud = true;
     private static int sPlayerStyle = 0;
     private static boolean sAutoUpdate = false;
+    private static boolean sCommunity = true;
     private static Listener sListener;
     private static SharedPreferences sPrefs;
 
@@ -57,6 +59,7 @@ public final class Theme {
         sCloud = sPrefs.getBoolean(K_CLOUD, true);
         sPlayerStyle = sPrefs.getInt(K_PSTYLE, 0);
         sAutoUpdate = sPrefs.getBoolean(K_AUTOUPDATE, false);
+        sCommunity = sPrefs.getBoolean(K_COMMUNITY, true);
         rebuild();
     }
 
@@ -78,6 +81,13 @@ public final class Theme {
 
     /** 自动更新：发现新版直接后台下载，下完再提示安装 */
     public static boolean autoUpdate() { return sAutoUpdate; }
+
+    /**
+     * 是否显示社区。
+     * 关掉之后底栏回到 4 项（首页/曲库/搜索/关于），
+     * 给只想要纯净播放器的人用。
+     */
+    public static boolean community() { return sCommunity; }
     public static float animScale() {
         return sAnim == ANIM_FAST ? 0.62f : sAnim == ANIM_SUBTLE ? 1.45f : 1f;
     }
@@ -111,6 +121,11 @@ public final class Theme {
     public static void setLyrics(boolean b) {
         sLyrics = b;
         if (sPrefs != null) sPrefs.edit().putBoolean(K_LYRICS, b).apply();
+    }
+
+    public static void setCommunity(boolean b) {
+        sCommunity = b;
+        if (sPrefs != null) sPrefs.edit().putBoolean(K_COMMUNITY, b).apply();
     }
 
     public static void setAutoUpdate(boolean b) {

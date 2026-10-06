@@ -24,7 +24,8 @@ public class CommunityPage {
     private final View root;
     private LinearLayout body;
     private ScrollView scroll;
-    private TextView whoLabel, statusLabel;
+    private TextView whoLabel, statusLabel, authBtn, authHint;
+    private LinearLayout authCard;
 
     private String sort = "new";
     private String query = "";
@@ -53,26 +54,51 @@ public class CommunityPage {
         title.setTypeface(Ui.tfBold());
         head.addView(title);
 
-        LinearLayout whoRow = Ui.row(c);
-        whoRow.setPadding(0, Ui.px(c, 6), 0, Ui.px(c, 10));
-        whoLabel = new TextView(c);
-        whoLabel.setTextSize(12);
-        whoLabel.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.9f));
-        whoRow.addView(whoLabel, new LinearLayout.LayoutParams(0,
-                LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        // 登录状态条：未登录时做成一眼就能看到的大按钮，
+        // 之前只是一个不起眼的小文字，很多人根本找不到登录入口。
+        authCard = Ui.column(c);
+        authCard.setPadding(Ui.px(c, 16), Ui.px(c, 14), Ui.px(c, 16), Ui.px(c, 14));
+        GradientDrawable acBg = new GradientDrawable();
+        acBg.setColor(t.secondaryContainer);
+        acBg.setCornerRadius(Ui.px(c, 18));
+        authCard.setBackground(acBg);
 
-        TextView authBtn = new TextView(c);
-        authBtn.setTextSize(12.5f);
+        whoLabel = new TextView(c);
+        whoLabel.setTextSize(13.5f);
+        whoLabel.setTypeface(Ui.tfBold());
+        whoLabel.setTextColor(t.onSecondaryContainer);
+        authCard.addView(whoLabel);
+
+        authHint = new TextView(c);
+        authHint.setTextSize(12);
+        authHint.setTextColor(Hct.withAlpha(t.onSecondaryContainer, 0.8f));
+        authHint.setPadding(0, Ui.px(c, 4), 0, Ui.px(c, 12));
+        authCard.addView(authHint);
+
+        authBtn = new TextView(c);
+        authBtn.setTextSize(14);
         authBtn.setTypeface(Ui.tfBold());
-        authBtn.setTextColor(t.primary);
-        authBtn.setPadding(Ui.px(c, 12), Ui.px(c, 6), Ui.px(c, 4), Ui.px(c, 6));
+        authBtn.setTextColor(t.onPrimary);
+        authBtn.setGravity(Gravity.CENTER);
+        authBtn.setPadding(0, Ui.px(c, 12), 0, Ui.px(c, 12));
+        GradientDrawable abBg = new GradientDrawable();
+        abBg.setColor(t.primary);
+        abBg.setCornerRadius(Ui.px(c, 22));
+        authBtn.setBackground(abBg);
         authBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Ui.hapticLight(v);
                 if (Community.loggedIn(act)) showLogout(); else showAuth();
             }
         });
-        head.addView(whoRow);
+        authCard.addView(authBtn);
+
+        LinearLayout.LayoutParams acLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        acLp.topMargin = Ui.px(c, 4);
+        acLp.bottomMargin = Ui.px(c, 12);
+        head.addView(authCard, acLp);
 
         // 分段：最新 / 最热
         LibraryPage.SegmentedBar seg =
@@ -134,11 +160,25 @@ public class CommunityPage {
     }
 
     private void refreshWho() {
-        Tokens t = Theme.t();
+        if (whoLabel == null) return;
         if (Community.loggedIn(act)) {
             whoLabel.setText("已登录：" + Community.userName(act));
+            authHint.setText("可以发布歌单、点赞和评论");
+            authBtn.setText("退出登录");
+            authBtn.setTextColor(Theme.t().onSecondaryContainer);
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(Theme.t().surfaceContainerHighest);
+            g.setCornerRadius(Ui.px(act, 22));
+            authBtn.setBackground(g);
         } else {
-            whoLabel.setText("未登录 · 登录后可以发布歌单、点赞和评论");
+            whoLabel.setText("还没有登录");
+            authHint.setText("登录后就能发布自己的歌单、点赞和评论。\n没有账号的话，填上邮箱就是注册。");
+            authBtn.setText("登录 / 注册");
+            authBtn.setTextColor(Theme.t().onPrimary);
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(Theme.t().primary);
+            g.setCornerRadius(Ui.px(act, 22));
+            authBtn.setBackground(g);
         }
     }
 

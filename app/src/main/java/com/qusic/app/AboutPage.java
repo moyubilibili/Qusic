@@ -145,6 +145,18 @@ public class AboutPage {
         col.addView(opts, fullWidth());
 
         // ── 音乐库 ──
+        col.addView(section(c, "社区", t));
+        LinearLayout com = Ui.column(c);
+        com.setBackground(card(t));
+        com.setPadding(Ui.px(c, 6), Ui.px(c, 6), Ui.px(c, 6), Ui.px(c, 6));
+        com.addView(settingRow(c, t, "显示社区",
+                Theme.community() ? "已开启 · 底栏有「社区」入口"
+                                  : "已关闭 · 纯净播放器模式",
+                "queue", new Runnable() {
+                    @Override public void run() { act.toggleCommunity(); }
+                }));
+        col.addView(com, fullWidth());
+
         col.addView(section(c, "桌面歌词", t));
         LinearLayout lyr = Ui.column(c);
         lyr.setBackground(card(t));

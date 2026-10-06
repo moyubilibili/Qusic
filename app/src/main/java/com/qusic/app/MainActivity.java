@@ -179,6 +179,7 @@ public class MainActivity extends Activity implements PlayerService.Listener {
 
         // MD3 底栏（要在 miniBar 之上，否则会被盖住）
         navBar = new LiquidNavBar(this, 0);
+        navBar.applyCommunity(Theme.community());
         navBar.setOnTabSelected(new LiquidNavBar.OnTabSelected() {
             @Override public void onSelect(int index) {
                 switchTab(index, false);
@@ -285,11 +286,11 @@ public class MainActivity extends Activity implements PlayerService.Listener {
             case 0: next = homePage.view(); break;
             case 1: next = libraryPage.view(); break;
             case 2: next = searchPage.view(); break;
-            case 3: next = communityPage.view(); break;
+            case 3: next = Theme.community() ? communityPage.view() : aboutPage.view(); break;
             case 4: next = aboutPage.view(); break;
         }
         if (next == null) return;
-        if (index == 3 && communityPage != null) communityPage.onShown();
+        if (index == 3 && Theme.community() && communityPage != null) communityPage.onShown();
 
         if (navBar != null && !switchingTab) {
             switchingTab = true;
@@ -515,6 +516,18 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         while ((n = in.read(buf)) > 0) bos.write(buf, 0, n);
         in.close();
         return new String(bos.toByteArray(), "UTF-8");
+    }
+
+    /** 开关社区。关掉后底栏回到 4 项，给只想当播放器用的人。 */
+    public void toggleCommunity() {
+        boolean next = !Theme.community();
+        Theme.setCommunity(next);
+        if (navBar != null) navBar.applyCommunity(next);
+        // 关掉时若正停在社区页，跳回首页
+        if (!next && currentTab == 3) switchTab(0, false);
+        refreshAllPages();
+        Toast.makeText(this, next ? "社区已开启" : "社区已隐藏，底栏回到 4 项",
+                Toast.LENGTH_SHORT).show();
     }
 
     /** 分享歌单到社区（曲库页调用） */

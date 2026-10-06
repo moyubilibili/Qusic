@@ -29,8 +29,13 @@ public class LiquidNavBar extends View {
 
     public interface OnTabSelected { void onSelect(int index); }
 
-    private static final String[] LABELS = {"首页", "曲库", "搜索", "社区", "关于"};
-    private static final int N = 5;
+    /** 完整 5 项 */
+    private static final String[] LABELS_FULL = {"首页", "曲库", "搜索", "社区", "关于"};
+    /** 关掉社区后的 4 项 */
+    private static final String[] LABELS_PURE = {"首页", "曲库", "搜索", "关于"};
+
+    private String[] labels = LABELS_FULL;
+    private int N = 5;
 
     /** MD3 规格：指示器 64×32dp */
     private static final float IND_W = 64f;
@@ -52,7 +57,7 @@ public class LiquidNavBar extends View {
     private float entrance = 0f;
 
     private OnTabSelected cb;
-    private final Icons.NavIcon[] icons = new Icons.NavIcon[N];
+    private final Icons.NavIcon[] icons = new Icons.NavIcon[5];
     private ValueAnimator indAnim;
 
     public LiquidNavBar(Context c) { this(c, 0); }
@@ -64,9 +69,24 @@ public class LiquidNavBar extends View {
         setLayerType(LAYER_TYPE_HARDWARE, null);
         icons[0] = Icons.HOME; icons[1] = Icons.LIBRARY;
         icons[2] = Icons.SEARCH; icons[3] = Icons.COMMUNITY; icons[4] = Icons.ABOUT;
+        applyCommunity(Theme.community());
     }
 
     public void setOnTabSelected(OnTabSelected c) { this.cb = c; }
+
+    /**
+     * 切换是否显示社区。
+     * 关掉后底栏变成 4 项，且「关于」从第 5 位挪回第 4 位。
+     */
+    public void applyCommunity(boolean show) {
+        String[] next = show ? LABELS_FULL : LABELS_PURE;
+        if (labels == next) return;
+        labels = next;
+        N = next.length;
+        if (selected >= N) { selected = N - 1; indPos = indTarget = selected; }
+        requestLayout();
+        invalidate();
+    }
 
     /** 由 Activity 传入真实的手势条高度 */
     public void setBottomInset(int px) {
@@ -209,7 +229,7 @@ public class LiquidNavBar extends View {
             p.setTypeface(sel > 0.5f ? Ui.tfBold() : Ui.tfMed());
             p.setTextSize(dp(12));
             p.setColor(color);
-            c.drawText(LABELS[i], cx, bounds.top + contentH() - dp(14), p);
+            c.drawText(labels[i], cx, bounds.top + contentH() - dp(14), p);
         }
 
         c.restoreToCount(save);
