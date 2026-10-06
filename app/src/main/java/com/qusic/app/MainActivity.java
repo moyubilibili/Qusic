@@ -47,6 +47,7 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     public static final int REQ_EXPORT_PLAYLIST = 3001;
     /** 从 .Qusic 导入歌单 */
     public static final int REQ_IMPORT_PLAYLIST = 3002;
+    public static final int REQ_IMPORT_TREE = 2002;      // 选文件夹（整个目录导入）
     public static final int REQ_PICK_AUDIO_PERM = 4001;
     /** 待导出的歌单（SAF 异步返回，得先记住内容） */
     private long pendingExportId;
@@ -630,6 +631,98 @@ public class MainActivity extends Activity implements PlayerService.Listener {
 
     public boolean isPostOpen() { return postOpen; }
 
+    // ── 整个文件夹导入 ─────────────────────────────────────────────────────
+    /**
+     * 扫描用户选的目录，把里面所有音频导入。
+     *
+     * <p>扫描可能要几秒（取决于文件数），所以先弹一个进度对话框，
+     * 而不是让界面看起来卡住了。
+     */
+    private void importFolder(final android.net.Uri treeUri) {
+        final TextView status = new TextView(this);
+        status.setTextSize(13.5f);
+        status.setTextColor(Hct.withAlpha(Theme.t().onSurfaceVariant, 0.95f));
+        status.setLineSpacing(Ui.px(this, 4), 1f);
+        status.setText("正在扫描文件夹…");
+
+        final android.app.Dialog dlg = new MdDialog.Builder(this)
+                .title("导入文件夹")
+                .message("会递归查找这个目录（含子目录）里的所有音频文件。")
+                .content(status)
+                .cancelable(false)
+                .positive("取消", new MdDialog.OnClick() {
+                    @Override public void onClick() { /* 让扫描跑完，只是关掉对话框 */ }
+                })
+                .show();
+
+        final long t0 = System.currentTimeMillis();
+        FolderImport.scan(this, treeUri, new FolderImport.Callback() {
+            @Override public void onProgress(final int folders, final int found) {
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        status.setText("已扫描 " + folders + " 个目录，找到 " + found + " 首…");
+                    }
+                });
+            }
+
+            @Override public void onResult(final java.util.List<android.net.Uri> uris,
+                                           final int folders, final boolean capped) {
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        if (uris.isEmpty()) {
+                            if (dlg.isShowing()) dlg.dismiss();
+                            new MdDialog.Builder(MainActivity.this)
+                                    .title("没找到音频")
+                                    .message("这个目录（含子目录）里没有发现音频文件。\n\n"
+                                            + "支持 MP3 / FLAC / M4A / WAV / OGG / APE 等格式。\n"
+                                            + "如果你确定里面有歌，可能是文件扩展名不常见，"
+                                            + "可以改用「导入音乐」手动挑。")
+                                    .positive("好", null).show();
+                            return;
+                        }
+                        status.setText("找到 " + uris.size() + " 首，正在读取信息…");
+                        doImportFolder(uris, folders, capped, dlg, t0);
+                    }
+                });
+            }
+        });
+    }
+
+    private void doImportFolder(final java.util.List<android.net.Uri> uris, final int folders,
+                                final boolean capped, final android.app.Dialog dlg,
+                                final long t0) {
+        Library.importUris(this, uris, new Library.ImportCallback() {
+            @Override public void onDone(final int added, final int skipped,
+                                         final java.util.List<Song> songs) {
+                runOnUiThread(new Runnable() {
+                    @Override public void run() {
+                        if (dlg.isShowing()) dlg.dismiss();
+                        refreshAllPages();
+                        long ms = System.currentTimeMillis() - t0;
+                        StringBuilder m = new StringBuilder();
+                        m.append("扫描了 ").append(folders).append(" 个目录，")
+                         .append("用时 ").append(ms / 1000.0).append(" 秒。\n\n")
+                         .append("新导入 ").append(added).append(" 首");
+                        if (skipped > 0) {
+                            m.append("，跳过 ").append(skipped).append(" 首")
+                             .append("（已在曲库里，或读不出音频信息）");
+                        }
+                        m.append("。");
+                        if (capped) {
+                            m.append("\n\n注意：文件太多，这次只导入了前 ")
+                             .append(uris.size()).append(" 首。")
+                             .append("可以再选一次子目录继续导入。");
+                        }
+                        new MdDialog.Builder(MainActivity.this)
+                                .title(added > 0 ? "导入完成" : "没有新增歌曲")
+                                .message(m.toString())
+                                .positive("好", null).show();
+                    }
+                });
+            }
+        });
+    }
+
     /** 开关社区。关掉后底栏回到 4 项，给只想当播放器用的人。 */
     public void toggleCommunity() {
         boolean next = !Theme.community();
@@ -668,6 +761,12 @@ public class MainActivity extends Activity implements PlayerService.Listener {
         super.onActivityResult(req, result, data);
 
         // ── 悬浮窗授权回来 ──
+        if (req == REQ_IMPORT_TREE) {
+            if (result == RESULT_OK && data != null && data.getData() != null) {
+                importFolder(data.getData());
+            }
+            return;
+        }
         if (req == REQ_OVERLAY) {
             if (LyricsWindowService.canDraw(this)) {
                 LyricsWindowService.start(this);

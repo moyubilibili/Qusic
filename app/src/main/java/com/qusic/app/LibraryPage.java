@@ -56,6 +56,17 @@ public class LibraryPage {
 
     public View view() { return root; }
 
+    /** 拉起系统的**目录**选择器，整个文件夹递归导入 */
+    public void triggerImportFolder() {
+        try {
+            act.startActivityForResult(FolderImport.pickerIntent(),
+                    MainActivity.REQ_IMPORT_TREE);
+        } catch (Throwable t) {
+            android.widget.Toast.makeText(act, "这个系统不支持选择文件夹",
+                    android.widget.Toast.LENGTH_SHORT).show();
+        }
+    }
+
     /** 拉起系统文件选择器导入音乐 */
     public void triggerImport() {
         android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
@@ -124,6 +135,23 @@ public class LibraryPage {
             @Override public void onClick(View v) { Ui.hapticLight(v); triggerImport(); }
         });
         ops.addView(importBtn);
+
+        // 整个文件夹导入 —— 音乐都放一个目录里的人不用再一首首点了
+        TextView folderBtn = new TextView(c);
+        folderBtn.setText("导入文件夹");
+        folderBtn.setTextSize(12.5f);
+        folderBtn.setTypeface(Ui.tfMed());
+        folderBtn.setTextColor(t.onPrimaryContainer);
+        folderBtn.setPadding(Ui.px(c, 14), Ui.px(c, 8), Ui.px(c, 14), Ui.px(c, 8));
+        folderBtn.setBackground(pill(t.primaryContainer, Ui.px(c, 20)));
+        folderBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) { Ui.hapticLight(v); triggerImportFolder(); }
+        });
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        flp.leftMargin = Ui.px(c, 8);
+        ops.addView(folderBtn, flp);
 
         final TextView sortBtn = new TextView(c);
         sortBtn.setTextSize(12.5f);
