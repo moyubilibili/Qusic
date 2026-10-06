@@ -53,7 +53,27 @@ public final class Updater {
     private Updater() {}
 
     // ── 版本号 ──────────────────────────────────────────────────────────────
-    /** 把 "v1.2.3" / "1.2" 解析成可比较的整数 */
+    /**
+     * 把 "v2.2" / "2.0.1" 解析成可比较的整数。
+     *
+     * <p><b>进制必须和 AndroidManifest 的 versionCode 完全一致</b>：
+     * <pre>
+     *   versionCode = major * 10000 + minor * 1000 + patch
+     *
+     *   2.0    → 20000
+     *   2.0.1  → 20001
+     *   2.1    → 21000
+     *   2.2    → 22000
+     * </pre>
+     *
+     * <p>之前这里写的是 {@code minor * 100}，于是 "2.2" 算成 20200，
+     * 比本机 versionCode 22000 还小 —— 检查更新永远显示「已是最新版本」。
+     *
+     * <p>注意：1.x 时期的 versionCode 用的是 {@code minor * 100}（如 1.9 = 10900），
+     * 与现在的进制不同。但因为远端永远是**最新**的 release，
+     * 只可能解析出 2.x 以上，所以旧的差异不会造成误判。
+     */
+    public static int parseVersion(String tag) {
     public static int parseVersion(String tag) {
         if (tag == null) return 0;
         String s = tag.trim();
@@ -63,7 +83,7 @@ public final class Updater {
         try { if (parts.length > 0) major = Integer.parseInt(parts[0].replaceAll("\\D", "")); } catch (Throwable ignored) {}
         try { if (parts.length > 1) minor = Integer.parseInt(parts[1].replaceAll("\\D", "")); } catch (Throwable ignored) {}
         try { if (parts.length > 2) patch = Integer.parseInt(parts[2].replaceAll("\\D", "")); } catch (Throwable ignored) {}
-        return major * 10000 + minor * 100 + patch;
+        return major * 10000 + minor * 1000 + patch;
     }
 
     public static int localVersionCode(Context ctx) {
