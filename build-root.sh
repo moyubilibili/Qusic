@@ -92,23 +92,52 @@ echo "== 5/7 打包 dex =="
 cp "$OUT/base.apk" "$OUT/Qusic-unsigned.apk"
 "$PY" "$DSH/adddex.py" "$OUT/Qusic-unsigned.apk" "$OUT/dex" || exit 1
 
-echo "== 6/7 签名（必须先签名）=="
+echo "== 6/7 签名（v1 + v2 + v3）=="
+# 先用 zipalign 保证 resources.arsc 等未压缩条目 4 字节对齐
+# （Android 11+ 要求 resources.arsc 既不压缩又 4 字节对齐）
+"$TOOL/zipalign" -f -p 4 "$OUT/Qusic-unsigned.apk" "$OUT/Qusic-aligned.apk" || exit 1
+
+# 再用 apksig 同时打 v1 + v2 + v3 三种签名方案。
+# 相比只用 jarsigner（仅 v1）：
+#   · v2 保护整个 APK，防篡改更强
+#   · v3 支持密钥轮换，且 Android 9+ 优先使用
+#   · 安装更快（不用逐个校验 JAR 条目）
 KS=$TOOL/debug.keystore
 if [ ! -f "$KS" ]; then
   keytool -genkeypair -keystore "$KS" -storepass android -keypass android \
     -alias md3lab -keyalg RSA -keysize 2048 -validity 10000 \
     -dname "CN=Qusic, OU=Dev, O=Local, L=City, ST=State, C=CN" >/dev/null 2>&1
 fi
-cp "$OUT/Qusic-unsigned.apk" "$OUT/Qusic-signed.apk"
-jarsigner -keystore "$KS" -storepass android -keypass android \
-  -sigalg SHA256withRSA -digestalg SHA-256 "$OUT/Qusic-signed.apk" md3lab 2>&1 | head -5
+java -cp "$TOOL/apksig.jar:$TOOL" ApkSign \
+  "$KS" android android md3lab "$OUT/Qusic-aligned.apk" "$OUT/Qusic.apk" || exit 1
 
-echo "== 7/7 zipalign（必须放在签名之后）=="
-# 关键：jarsigner 会重写 zip，把条目挪到未对齐的偏移上。
-# Android 11+ (targetSdk 30+) 要求 resources.arsc 既「不压缩」又「4 字节对齐」，
-# 所以对齐必须是最后一步。
-# 用 v1(JAR) 签名时这样做是安全的：它只对条目内容做摘要，不覆盖文件布局。
-"$TOOL/zipalign" -f -p 4 "$OUT/Qusic-signed.apk" "$OUT/Qusic.apk" || exit 1
+echo "== 7/7 校验 =="
+# 签名后确认【未压缩 + 4 字节对齐】两个条件仍然满足
+# （apksig 会在末尾插入签名块，理论上不影响前面的条目偏移，但要实测确认）
+"$PY" - "$OUT/Qusic.apk" <<'PYEOF'
+import struct, sys, zipfile
+apk = sys.argv[1]
+d = open(apk, 'rb').read()
+off = 0
+data_off = None
+while True:
+    i = d.find(b'PK\x03\x04', off)
+    if i < 0: break
+    nlen, elen = struct.unpack('<HH', d[i+26:i+30])
+    if d[i+30:i+30+nlen] == b'resources.arsc':
+        data_off = i + 30 + nlen + elen
+        break
+    off = i + 4
+z = zipfile.ZipFile(apk)
+arsc = z.getinfo('resources.arsc')
+v1 = any(n.startswith('META-INF/') and n.endswith(('.RSA', '.DSA', '.EC'))
+         for n in z.namelist())
+has_v23 = b'APK Sig Block 42' in d
+print("   resources.arsc 未压缩 :", arsc.compress_type == 0)
+print("   resources.arsc 4字节对齐:", data_off is not None and data_off % 4 == 0)
+print("   v1 (JAR) 签名        :", v1)
+print("   v2/v3 签名块          :", has_v23)
+PYEOF
 
 chmod -R a+rwX "$OUT" 2>/dev/null
 ls -lh "$OUT/Qusic.apk"

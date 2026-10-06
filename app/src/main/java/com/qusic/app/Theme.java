@@ -27,6 +27,7 @@ public final class Theme {
     public static final String K_PSTYLE = "player_style";
     public static final String K_AUTOUPDATE = "auto_update";
     public static final String K_COMMUNITY = "show_community";
+    public static final String K_TERMS = "terms_agreed";
 
     /** 动画速度档位 */
     public static final int ANIM_FAST = 0, ANIM_NORMAL = 1, ANIM_SUBTLE = 2;
@@ -121,6 +122,17 @@ public final class Theme {
     public static void setLyrics(boolean b) {
         sLyrics = b;
         if (sPrefs != null) sPrefs.edit().putBoolean(K_LYRICS, b).apply();
+    }
+
+    /** 是否已同意免责条款（跟 activated 存在同一个文件里，便于清理） */
+    public static boolean termsAgreed(android.content.Context c) {
+        return c.getSharedPreferences("qusic_state", android.content.Context.MODE_PRIVATE)
+                .getBoolean(K_TERMS, false);
+    }
+
+    public static void setTermsAgreed(android.content.Context c, boolean b) {
+        c.getSharedPreferences("qusic_state", android.content.Context.MODE_PRIVATE)
+                .edit().putBoolean(K_TERMS, b).apply();
     }
 
     public static void setCommunity(boolean b) {

@@ -85,6 +85,7 @@ public class CommunityPage {
         abBg.setColor(t.primary);
         abBg.setCornerRadius(Ui.px(c, 22));
         authBtn.setBackground(abBg);
+        Ui.pressable(authBtn);
         authBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) {
                 Ui.hapticLight(v);
@@ -161,24 +162,48 @@ public class CommunityPage {
 
     private void refreshWho() {
         if (whoLabel == null) return;
-        if (Community.loggedIn(act)) {
-            whoLabel.setText("已登录：" + Community.userName(act));
-            authHint.setText("可以发布歌单、点赞和评论");
-            authBtn.setText("退出登录");
-            authBtn.setTextColor(Theme.t().onSecondaryContainer);
-            GradientDrawable g = new GradientDrawable();
-            g.setColor(Theme.t().surfaceContainerHighest);
-            g.setCornerRadius(Ui.px(act, 22));
-            authBtn.setBackground(g);
-        } else {
-            whoLabel.setText("还没有登录");
+        boolean in = Community.loggedIn(act);
+
+        // 登录后整块卡片收成一行，把版面让给歌单列表 ——
+        // 之前登录了还占着一大块，很浪费空间，也不像个「已登录」该有的样子。
+        whoLabel.setText(in ? "已登录：" + Community.userName(act) : "还没有登录");
+        authHint.setVisibility(in ? View.GONE : View.VISIBLE);
+        if (!in) {
             authHint.setText("登录后就能发布自己的歌单、点赞和评论。\n没有账号的话，填上邮箱就是注册。");
-            authBtn.setText("登录 / 注册");
-            authBtn.setTextColor(Theme.t().onPrimary);
-            GradientDrawable g = new GradientDrawable();
-            g.setColor(Theme.t().primary);
-            g.setCornerRadius(Ui.px(act, 22));
-            authBtn.setBackground(g);
+        }
+
+        // 登录后按钮变成一个小号的「退出」，不再是大主按钮
+        authBtn.setText(in ? "退出登录" : "登录 / 注册");
+        int padH = Ui.px(act, in ? 14 : 0);
+        int padV = Ui.px(act, in ? 7 : 12);
+        authBtn.setPadding(padH, padV, padH, padV);
+        authBtn.setTextSize(in ? 12.5f : 14);
+        authBtn.setTextColor(in ? Hct.withAlpha(Theme.t().onSurfaceVariant, 0.95f)
+                                : Theme.t().onPrimary);
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(in ? Theme.t().surfaceContainerHighest : Theme.t().primary);
+        g.setCornerRadius(Ui.px(act, 22));
+        authBtn.setBackground(g);
+
+        // 卡片底色也换掉：登录后从「强调容器」变成中性
+        GradientDrawable cg = new GradientDrawable();
+        cg.setColor(in ? Theme.t().surfaceContainerLow : Theme.t().secondaryContainer);
+        cg.setCornerRadius(Ui.px(act, 18));
+        authCard.setBackground(cg);
+        int cp = Ui.px(act, in ? 12 : 16);
+        authCard.setPadding(cp, cp, cp, cp);
+        authCard.setOrientation(LinearLayout.VERTICAL);
+        whoLabel.setTextColor(in ? Theme.t().onSurface : Theme.t().onSecondaryContainer);
+        whoLabel.setTextSize(in ? 12.5f : 13.5f);
+
+        // 登录后按钮靠右、变小，不再通栏
+        LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) authBtn.getLayoutParams();
+        if (lp != null) {
+            lp.width = in ? LinearLayout.LayoutParams.WRAP_CONTENT
+                          : LinearLayout.LayoutParams.MATCH_PARENT;
+            lp.gravity = in ? Gravity.END : Gravity.NO_GRAVITY;
+            lp.topMargin = Ui.px(act, in ? 8 : 0);
+            authBtn.setLayoutParams(lp);
         }
     }
 
@@ -242,6 +267,7 @@ public class CommunityPage {
             metaRow.addView(meta);
             card.addView(metaRow);
 
+            Ui.pressable(card);
             card.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) {
                     Ui.hapticLight(v);
@@ -292,8 +318,9 @@ public class CommunityPage {
         back.setTypeface(Ui.tfMed());
         back.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.95f));
         back.setPadding(0, 0, 0, Ui.px(c, 10));
+        Ui.pressable(back);
         back.setOnClickListener(new View.OnClickListener() {
-            @Override public void onClick(View v) { Ui.hapticLight(v); openId = 0; load(); }
+            @Override public void onClick(View v) { Ui.hapticLight(v); goBackToList(); }
         });
         body.addView(back);
 
@@ -344,6 +371,7 @@ public class CommunityPage {
         ib.setColor(t.primary);
         ib.setCornerRadius(Ui.px(c, 22));
         imp.setBackground(ib);
+        Ui.pressable(imp);
         imp.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { Ui.hapticLight(v); doImport(p); }
         });
@@ -361,6 +389,7 @@ public class CommunityPage {
         lb.setColor(t.secondaryContainer);
         lb.setCornerRadius(Ui.px(c, 22));
         lk.setBackground(lb);
+        Ui.pressable(lk);
         lk.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { Ui.hapticLight(v); doLike(p.id); }
         });
@@ -478,6 +507,15 @@ public class CommunityPage {
         }
         return row;
     }
+
+    /** 回到列表（详情页的返回） */
+    public void goBackToList() {
+        openId = 0;
+        load();
+    }
+
+    /** 当前是否停留在某个帖子的详情里 */
+    public boolean inDetail() { return openId != 0; }
 
     // ── 动作 ────────────────────────────────────────────────────────────────
     private void doImport(final Community.Post p) {

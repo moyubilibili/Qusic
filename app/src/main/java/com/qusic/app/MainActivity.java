@@ -415,13 +415,12 @@ public class MainActivity extends Activity implements PlayerService.Listener {
                     return;
                 }
                 if (info.hasUpdate) {
+                    // 不管是不是自动更新，**都要弹窗** ——
+                    // 用户有权知道有新版本、更新了什么。
+                    // 区别只是：自动模式下弹窗里会说明「已开始后台下载」，并即刻下载。
+                    Updater.showUpdateDialog(self, info, Theme.autoUpdate());
                     if (Theme.autoUpdate() && info.apkUrl.length() > 0) {
-                        // 自动更新：不打断用户，后台下载，完成后系统提示安装
-                        Toast.makeText(self, "发现新版本 " + info.tag + "，正在后台下载…",
-                                Toast.LENGTH_SHORT).show();
                         Updater.downloadAndInstall(self, info);
-                    } else {
-                        Updater.showUpdateDialog(self, info);
                     }
                 } else if (manual) {
                     Toast.makeText(self, "已是最新版本 " + Updater.localVersionName(self),
@@ -681,7 +680,18 @@ public class MainActivity extends Activity implements PlayerService.Listener {
     }
 
     @Override public void onBackPressed() {
-        if (currentTab != 0) { switchTab(0, true); return; }
+        // 社区页在帖子详情时，返回键先回到列表 ——
+        // 之前会直接退出应用，非常反直觉。
+        if (currentTab == 3 && Theme.community() && communityPage != null
+                && communityPage.inDetail()) {
+            communityPage.goBackToList();
+            return;
+        }
+        // 不在首页时，返回键回首页，而不是退出
+        if (currentTab != 0) {
+            switchTab(0, true);
+            return;
+        }
         super.onBackPressed();
     }
 

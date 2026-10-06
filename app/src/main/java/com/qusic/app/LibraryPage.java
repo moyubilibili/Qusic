@@ -927,6 +927,7 @@ public class LibraryPage {
                 return true;
             }
         });
+        Ui.pressable(row);
         return row;
     }
 

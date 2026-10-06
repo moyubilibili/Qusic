@@ -159,6 +159,41 @@ public final class Ui {
 
     public static int px(Context c, float dp) { return (int) dp(c, dp); }
 
+    /**
+     * 给任意 View 加「按下去有反馈」。
+     *
+     * <p>自绘的卡片/行如果只挂 setOnClickListener，点上去**毫无视觉反应**，
+     * 用起来像没点到 —— 这是最影响手感的问题。这里统一加：
+     * 按下缩到 0.97 并略降透明度，抬起弹回。
+     */
+    public static void pressable(final View v) {
+        if (v == null) return;
+        v.setOnTouchListener(new android.view.View.OnTouchListener() {
+            @Override public boolean onTouch(View view, android.view.MotionEvent e) {
+                switch (e.getActionMasked()) {
+                    case android.view.MotionEvent.ACTION_DOWN:
+                        view.animate().cancel();
+                        view.animate().scaleX(0.97f).scaleY(0.97f).alpha(0.82f)
+                                .setDuration(90).start();
+                        break;
+                    case android.view.MotionEvent.ACTION_UP:
+                    case android.view.MotionEvent.ACTION_CANCEL:
+                        view.animate().cancel();
+                        view.animate().scaleX(1f).scaleY(1f).alpha(1f)
+                                .setDuration(180)
+                                .setInterpolator(Theme.EMPHASIZED).start();
+                        break;
+                }
+                return false;   // 不吞事件，点击照常触发
+            }
+        });
+    }
+
+    /** 统一的「点一下」反馈音/震动 */
+    public static void tap(View v) {
+        hapticLight(v);
+    }
+
     // ── 触感反馈 ────────────────────────────────────────────────────────────
     /** 轻点反馈（列表项、按钮） */
     public static void hapticLight(View v) {

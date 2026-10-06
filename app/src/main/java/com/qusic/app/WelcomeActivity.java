@@ -38,7 +38,20 @@ public class WelcomeActivity extends Activity {
         Theme.init(this);
         Library.init(this);
 
-        // 已经激活过就直接进主界面，不留痕迹
+        // ① 先看有没有同意免责条款（没同意就先去条款页）
+        if (!Theme.termsAgreed(this)) {
+            startActivityForResult(new android.content.Intent(this, TermsActivity.class)
+                    .putExtra(TermsActivity.EXTRA_FROM_WELCOME, true), REQ_TERMS);
+            return;
+        }
+        proceed();
+    }
+
+    private static final int REQ_TERMS = 9001;
+
+    /** 条款已同意后走的正常流程 */
+    private void proceed() {
+        // ② 已经激活过就直接进主界面，不留痕迹
         if (getSharedPreferences("qusic_state", MODE_PRIVATE)
                 .getBoolean("activated", false)) {
             goMain();
@@ -236,6 +249,15 @@ public class WelcomeActivity extends Activity {
         v.animate().alpha(1f).translationY(0f)
                 .setStartDelay(delay).setDuration(Theme.dur(480))
                 .setInterpolator(Theme.EMPHASIZED).start();
+    }
+
+    /** 条款页返回 */
+    @Override protected void onActivityResult(int req, int res, android.content.Intent d) {
+        super.onActivityResult(req, res, d);
+        if (req == REQ_TERMS) {
+            if (res == RESULT_OK) goMain();   // 同意了，直接进主界面
+            else finish();                    // 不同意就退出
+        }
     }
 
     private void goMain() {

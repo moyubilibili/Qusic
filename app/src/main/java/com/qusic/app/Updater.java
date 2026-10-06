@@ -345,6 +345,14 @@ public final class Updater {
     // ── 更新弹窗 ────────────────────────────────────────────────────────────
     /** 展示更新日志 + 「下载并安装」 */
     public static void showUpdateDialog(final android.app.Activity act, final Info info) {
+        showUpdateDialog(act, info, false);
+    }
+
+    /**
+     * @param auto true = 已开启自动更新，弹窗里说明「正在后台下载」
+     */
+    public static void showUpdateDialog(final android.app.Activity act, final Info info,
+                                        final boolean auto) {
         if (act == null || act.isFinishing()) return;
         Tokens t = Theme.t();
         int pad = Ui.px(act, 22);
@@ -360,7 +368,9 @@ public final class Updater {
         box.addView(title);
 
         android.widget.TextView sub = new android.widget.TextView(act);
-        sub.setText("当前版本 " + localVersionName(act));
+        sub.setText(auto
+                ? "当前 " + localVersionName(act) + " · 已开启自动更新，正在后台下载"
+                : "当前版本 " + localVersionName(act));
         sub.setTextColor(Hct.withAlpha(t.onSurfaceVariant, 0.85f));
         sub.setTextSize(12.5f);
         sub.setPadding(0, Ui.px(act, 4), 0, Ui.px(act, 14));
@@ -401,7 +411,8 @@ public final class Updater {
         btns.addView(later);
 
         android.widget.TextView go = new android.widget.TextView(act);
-        go.setText(info.apkUrl.length() > 0 ? "下载并安装" : "去下载");
+        go.setText(auto ? "查看进度 / 安装"
+                : (info.apkUrl.length() > 0 ? "下载并安装" : "去下载"));
         go.setTextSize(13.5f);
         go.setTypeface(Ui.tfBold());
         go.setTextColor(t.onPrimary);
@@ -439,8 +450,12 @@ public final class Updater {
         go.setOnClickListener(new android.view.View.OnClickListener() {
             @Override public void onClick(android.view.View v) {
                 d.dismiss();
-                if (info.apkUrl.length() > 0) downloadAndInstall(act, info);
-                else openReleasesPage(act);
+                // 自动模式下已经在下载了，这里只负责在没下载时补一次
+                if (info.apkUrl.length() > 0) {
+                    if (!auto) downloadAndInstall(act, info);
+                } else {
+                    openReleasesPage(act);
+                }
             }
         });
         d.show();

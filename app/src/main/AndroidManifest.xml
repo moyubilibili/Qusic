@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.qusic.app"
-    android:versionCode="10901"
-    android:versionName="1.9.1">
+    android:versionCode="20000"
+    android:versionName="2.0">
 
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -62,6 +62,11 @@
             android:name=".PlayerService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <activity
+            android:name=".TermsActivity"
+            android:exported="false"
+            android:theme="@android:style/Theme.NoTitleBar" />
 
         <!-- 桌面歌词悬浮窗 -->
         <service
