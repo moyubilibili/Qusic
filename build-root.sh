@@ -24,6 +24,21 @@ VNAME=$(sed -n 's/.*android:versionName="\([^"]*\)".*/\1/p' "$SRC/AndroidManifes
 VCODE=${VCODE:-1}; VNAME=${VNAME:-1.0}
 echo "项目: Qusic  包名: $PKG  版本: $VNAME ($VCODE)"
 
+# ── 版本号自检 ──
+# 规则：versionCode = major*10000 + minor*1000 + patch
+# 为什么要查：Updater 是靠 releases.atom 的 tag 算出期望的 versionCode 来比大小的。
+# 如果 manifest 里的 code 不按这个规则（比如 2.5.0 配 24010），
+# 装完之后 25000 > 24010 永远成立，就会**一直提示有更新**。
+EXPECT=$(echo "$VNAME" | awk -F. '{printf "%d", $1*10000 + $2*1000 + $3}')
+if [ "$VCODE" != "$EXPECT" ]; then
+  echo ""
+  echo "  ✗ 版本号不符合规则：versionName=$VNAME 应该是 versionCode=$EXPECT，但写的是 $VCODE"
+  echo "    规则：major*10000 + minor*1000 + patch"
+  echo "    不改的话更新检测会一直提示「有更新」。"
+  echo ""
+  exit 1
+fi
+
 echo "== 0/7 清理 =="
 rm -rf "$OUT"
 mkdir -p "$OUT/res-c" "$OUT/gen" "$OUT/classes" "$OUT/dex"
